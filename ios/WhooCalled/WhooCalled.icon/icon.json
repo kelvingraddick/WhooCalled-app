@@ -1,13 +1,32 @@
 {
-  "fill" : {
-    "automatic-gradient" : "extended-srgb:0.00000,0.53333,1.00000,1.00000"
-  },
+  "fill-specializations" : [
+    {
+      "appearance" : "light",
+      "value" : {
+        "solid" : "extended-srgb:0.95686,0.94510,0.91765,1.00000"
+      }
+    },
+    {
+      "appearance" : "dark",
+      "value" : "system-dark"
+    }
+  ],
   "groups" : [
     {
       "layers" : [
         {
           "fill" : "none",
           "image-name" : "whoo-called-icon-liquid-source.png",
+          "image-name-specializations" : [
+            {
+              "appearance" : "light",
+              "value" : "whoo-called-icon-liquid-light-source.png"
+            },
+            {
+              "appearance" : "dark",
+              "value" : "whoo-called-icon-liquid-source.png"
+            }
+          ],
           "name" : "whoo-called-icon-liquid-source"
         }
       ],
@@ -15,10 +34,22 @@
         "kind" : "neutral",
         "opacity" : 0.5
       },
-      "translucency" : {
-        "enabled" : true,
-        "value" : 0.5
-      }
+      "translucency-specializations" : [
+        {
+          "appearance" : "light",
+          "value" : {
+            "enabled" : false,
+            "value" : 0.5
+          }
+        },
+        {
+          "appearance" : "dark",
+          "value" : {
+            "enabled" : true,
+            "value" : 0.5
+          }
+        }
+      ]
     }
   ],
   "supported-platforms" : {

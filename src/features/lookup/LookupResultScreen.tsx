@@ -2,6 +2,7 @@ import Clipboard from '@react-native-clipboard/clipboard';
 import { Ionicons } from '@react-native-vector-icons/ionicons';
 import { useMemo, useState } from 'react';
 import {
+  ActivityIndicator,
   Modal,
   Linking,
   Pressable,
@@ -40,6 +41,7 @@ type LookupResultScreenProps = Readonly<{
   summary: CommunitySummary;
   reportSummary: CommunityReportSummary;
   hasOwnReport: boolean;
+  isRefreshing: boolean;
   onBack: () => void;
   onRefresh: () => void;
   onCandidates: () => void;
@@ -67,6 +69,7 @@ export function LookupResultScreen({
   summary,
   reportSummary,
   hasOwnReport,
+  isRefreshing,
   onBack,
   onRefresh,
   onCandidates,
@@ -539,11 +542,26 @@ export function LookupResultScreen({
           </Text>
         </Pressable>
         <Pressable
+          accessibilityLabel={isRefreshing ? 'Refreshing lookup' : 'Refresh'}
           accessibilityRole="button"
+          accessibilityState={{ busy: isRefreshing, disabled: isRefreshing }}
+          disabled={isRefreshing}
           onPress={onRefresh}
-          style={styles.refreshAction}
+          style={({ pressed }) => [
+            styles.refreshAction,
+            isRefreshing && styles.refreshActionLoading,
+            pressed && !isRefreshing && styles.refreshActionPressed,
+          ]}
         >
-          <Text style={styles.refreshActionText}>Refresh</Text>
+          {isRefreshing ? (
+            <ActivityIndicator
+              accessibilityLabel="Refresh in progress"
+              color={theme.accentText}
+              size="small"
+            />
+          ) : (
+            <Text style={styles.refreshActionText}>Refresh</Text>
+          )}
         </Pressable>
       </View>
 
@@ -993,6 +1011,8 @@ const createStyles = (theme: AppTheme) =>
       height: 52,
       justifyContent: 'center',
     },
+    refreshActionLoading: { opacity: 0.82 },
+    refreshActionPressed: { opacity: 0.88 },
     refreshActionText: {
       color: theme.accentText,
       fontFamily: fonts.extraBold,

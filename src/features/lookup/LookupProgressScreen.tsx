@@ -70,7 +70,7 @@ export function LookupProgressScreen({
       </View>
 
       <View style={styles.hero}>
-        <BrandOwl framed size={122} />
+        <BrandOwl framed={false} size={122} />
         <Text style={styles.phone}>{lookup?.phoneDisplay ?? phoneDisplay}</Text>
         <Text style={styles.subtitle}>Checking independent sources…</Text>
       </View>

@@ -23,6 +23,12 @@ export type AppTheme = Readonly<{
   highConfidenceSurface: string;
   lowConfidence: string;
   lowConfidenceSurface: string;
+  purchaseBackground: string;
+  purchaseSurface: string;
+  purchaseSelectedSurface: string;
+  purchaseToggleSelectedSurface: string;
+  purchaseMutedText: string;
+  purchaseCurrentText: string;
 }>;
 
 export const themes: Readonly<Record<ThemeMode, AppTheme>> = {
@@ -44,6 +50,12 @@ export const themes: Readonly<Record<ThemeMode, AppTheme>> = {
     highConfidenceSurface: '#E2ECDD',
     lowConfidence: '#7B3B33',
     lowConfidenceSurface: '#F4E5E2',
+    purchaseBackground: '#F4F1EA',
+    purchaseSurface: '#FFFCF8',
+    purchaseSelectedSurface: '#FFF3D5',
+    purchaseToggleSelectedSurface: '#F1E8D8',
+    purchaseMutedText: '#685F56',
+    purchaseCurrentText: '#685F56',
   },
   dark: {
     mode: 'dark',
@@ -63,6 +75,12 @@ export const themes: Readonly<Record<ThemeMode, AppTheme>> = {
     highConfidenceSurface: '#23271F',
     lowConfidence: '#B5ABA5',
     lowConfidenceSurface: '#282321',
+    purchaseBackground: '#0E0D0C',
+    purchaseSurface: '#1A1816',
+    purchaseSelectedSurface: '#242015',
+    purchaseToggleSelectedSurface: '#29251F',
+    purchaseMutedText: '#AAA29A',
+    purchaseCurrentText: '#847D75',
   },
 } as const;
 

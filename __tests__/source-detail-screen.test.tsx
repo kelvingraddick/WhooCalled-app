@@ -119,4 +119,75 @@ describe('SourceDetailScreen', () => {
     expect(onMessage).toHaveBeenCalledWith('We could not open this source.');
     openUrl.mockRestore();
   });
+
+  it('shows every candidate when a source supports multiple names', async () => {
+    const candidates = [
+      candidate,
+      {
+        ...candidate,
+        id: 'candidate-b',
+        name: 'Kelvin Bryan Graddick',
+        kind: 'PERSON' as const,
+        region: 'Florida',
+        score: 65,
+        confidenceLabel: 'MEDIUM' as const,
+      },
+      {
+        ...candidate,
+        id: 'candidate-c',
+        name: 'Kelvin Graddick',
+        kind: 'PERSON' as const,
+        region: 'Georgia',
+        score: 60,
+        confidenceLabel: 'MEDIUM' as const,
+      },
+      {
+        ...candidate,
+        id: 'candidate-d',
+        name: 'K. B. Graddick',
+        kind: 'PERSON' as const,
+        region: 'Alabama',
+        score: 55,
+        confidenceLabel: 'MEDIUM' as const,
+      },
+    ];
+    const lookupWithCandidates: LookupDetail = {
+      ...lookup,
+      result: {
+        phoneDisplay: lookup.phoneDisplay,
+        carrier: null,
+        lineType: null,
+        region: null,
+        checkedAt: '2026-09-01T15:00:00.000Z',
+        confidenceScore: 65,
+        confidenceLabel: 'MEDIUM',
+        primaryCandidateId: candidate.id,
+        candidates,
+        sources: [],
+        spamSources: [],
+        searchAttributions: [],
+        isPartial: false,
+      },
+    };
+    const screen = await render(
+      <SourceDetailScreen
+        candidate={candidate}
+        lookup={lookupWithCandidates}
+        onBack={jest.fn()}
+        onMessage={jest.fn()}
+        onReport={jest.fn()}
+        source={{
+          ...source,
+          description: '4 candidate names linked to this number.',
+          kind: 'IDENTITY',
+        }}
+      />,
+    );
+
+    expect(screen.getByText('CANDIDATE NAMES')).toBeTruthy();
+    expect(screen.getByText('Johnson HVAC')).toBeTruthy();
+    expect(screen.getByText('Kelvin Bryan Graddick')).toBeTruthy();
+    expect(screen.getByText('Kelvin Graddick')).toBeTruthy();
+    expect(screen.getByText('K. B. Graddick')).toBeTruthy();
+  });
 });

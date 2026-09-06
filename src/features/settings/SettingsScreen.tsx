@@ -225,7 +225,7 @@ export function SettingsScreen({
     }
 
     debugTapCount.current += 1;
-    if (debugTapCount.current === 7) {
+    if (debugTapCount.current === 3) {
       debugTapCount.current = 0;
       setDebugUnlocked(true);
     }

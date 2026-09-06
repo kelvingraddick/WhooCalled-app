@@ -377,7 +377,7 @@ function toCandidates(
   owners: IdentityOwner[],
   validation: PhoneValidation | null,
 ): CallerCandidate[] {
-  const fromOwners = owners.slice(0, 3).map((owner, index) => ({
+  const fromOwners = owners.slice(0, 4).map((owner, index) => ({
     id: candidateId(index),
     name: owner.name,
     kind: owner.kind,
@@ -780,7 +780,7 @@ export const runLookup = onTaskDispatched<LookupTask>(
               url: null,
               score: 86,
               kind: 'IDENTITY' as const,
-              candidateId: candidateIdValue,
+              candidateId: null,
               origin: 'INDEPENDENT' as const,
               retrievalProvider: null,
               retrievedAt: checkedAt,

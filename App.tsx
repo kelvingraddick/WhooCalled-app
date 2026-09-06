@@ -113,6 +113,7 @@ function AppContent() {
   const [lookupState, setLookupState] = useState<LookupRequestState>({
     kind: 'idle',
   });
+  const [isRefreshing, setIsRefreshing] = useState(false);
   const [recentLookups, setRecentLookups] = useState<LookupHistoryItem[]>([]);
   const [historyLookups, setHistoryLookups] = useState<LookupHistoryItem[]>([]);
   const [historyHasMore, setHistoryHasMore] = useState(false);
@@ -453,10 +454,11 @@ function AppContent() {
   }, []);
 
   const submitRefresh = useCallback(async () => {
-    if (!activeLookup) {
+    if (!activeLookup || isRefreshing) {
       return;
     }
 
+    setIsRefreshing(true);
     setLookupState({ kind: 'loading' });
     try {
       const result = await lookupGateway.requestRefresh(activeLookup);
@@ -484,8 +486,10 @@ function AppContent() {
       const message = 'We could not start a refresh. Your credit was not used.';
       setLookupState({ kind: 'message', tone: 'error', message });
       Alert.alert('Unable to refresh', message);
+    } finally {
+      setIsRefreshing(false);
     }
-  }, [activeLookup]);
+  }, [activeLookup, isRefreshing]);
 
   const beginRefresh = useCallback(() => {
     if (!activeLookup) {
@@ -1339,6 +1343,7 @@ function AppContent() {
                 setScreen('lookup-report');
               }}
               hasOwnReport={Boolean(ownReport)}
+              isRefreshing={isRefreshing}
               reportSummary={communityReportSummary}
               selectedCandidateId={selectedCandidateId}
               summary={communitySummary}

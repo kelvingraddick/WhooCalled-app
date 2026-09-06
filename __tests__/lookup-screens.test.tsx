@@ -160,6 +160,7 @@ describe('lookup screens', () => {
         onRefresh={onRefresh}
         onReport={onReport}
         hasOwnReport={false}
+        isRefreshing={false}
         reportSummary={{
           total: 3,
           counts: {
@@ -253,6 +254,7 @@ describe('lookup screens', () => {
         onReport={jest.fn()}
         onSource={jest.fn()}
         hasOwnReport
+        isRefreshing={false}
         reportSummary={{
           total: 1,
           counts: {
@@ -276,5 +278,47 @@ describe('lookup screens', () => {
     });
 
     expect(onDeleteReport).toHaveBeenCalledTimes(1);
+  });
+
+  it('shows a disabled loading control while a refresh is being started', async () => {
+    const onRefresh = jest.fn();
+    const screen = await renderWithTheme(
+      <LookupResultScreen
+        lookup={lookup}
+        onBack={jest.fn()}
+        onCandidates={jest.fn()}
+        onComments={jest.fn()}
+        onCorrectData={jest.fn()}
+        onDeleteReport={jest.fn()}
+        onMessage={jest.fn()}
+        onRefresh={onRefresh}
+        onReport={jest.fn()}
+        onSource={jest.fn()}
+        hasOwnReport={false}
+        isRefreshing
+        reportSummary={{
+          total: 0,
+          counts: {
+            SPAM: 0,
+            SCAM_FRAUD: 0,
+            TELEMARKETING: 0,
+            ROBOCALL: 0,
+            DEBT_COLLECTION: 0,
+            POLITICAL: 0,
+            SURVEY: 0,
+            OTHER: 0,
+          },
+        }}
+        selectedCandidateId={null}
+        summary={{ reportCount: 0, commentCount: 0 }}
+      />,
+    );
+
+    expect(screen.getByLabelText('Refresh in progress')).toBeTruthy();
+    expect(screen.getByLabelText('Refreshing lookup')).toBeDisabled();
+    await act(async () => {
+      fireEvent.press(screen.getByLabelText('Refreshing lookup'));
+    });
+    expect(onRefresh).not.toHaveBeenCalled();
   });
 });

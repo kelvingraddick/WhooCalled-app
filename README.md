@@ -93,7 +93,7 @@ for project `whoo-called`, with current-spend notifications at 50%, 90%, and
 
 ## Hidden tester Debug tools
 
-The Settings version label reveals tester tools after seven taps for Firebase
+The Settings version label reveals tester tools after three taps for Firebase
 users whose email is listed in the server-side `DEBUG_TESTER_EMAILS` Functions
 parameter. Keep the value empty until approved tester emails are available.
 The backend checks the allowlist on every debug action, so the mobile app does

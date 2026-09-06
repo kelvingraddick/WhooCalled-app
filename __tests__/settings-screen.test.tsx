@@ -118,14 +118,14 @@ describe('Settings screen', () => {
     expect(onLookupHistoryPress).toHaveBeenCalledTimes(1);
   });
 
-  it('reveals tester Debug controls only after seven version taps', async () => {
+  it('reveals tester Debug controls only after three version taps', async () => {
     const unallowlisted = await renderScreen();
-    await tapVersion(unallowlisted.screen, 7);
+    await tapVersion(unallowlisted.screen, 3);
     expect(unallowlisted.screen.queryByText('DEBUG')).toBeNull();
     await unallowlisted.screen.unmount();
 
     const allowed = await renderScreen({ debugAccess: true });
-    await tapVersion(allowed.screen, 6);
+    await tapVersion(allowed.screen, 2);
     expect(allowed.screen.queryByText('DEBUG')).toBeNull();
 
     await tapVersion(allowed.screen, 1);
@@ -154,7 +154,7 @@ describe('Settings screen', () => {
       debugAccess: true,
       isDebugActionLoading: true,
     });
-    await tapVersion(rendered.screen, 7);
+    await tapVersion(rendered.screen, 3);
 
     const reset = rendered.screen.getByLabelText('Reset monthly lookups');
     expect(reset.props.accessibilityState).toEqual({ disabled: true });

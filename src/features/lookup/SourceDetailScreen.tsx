@@ -67,6 +67,12 @@ export function SourceDetailScreen({
   const hasUrl = Boolean(source.url);
   const sourceLabel =
     source.origin === 'FIRST_PARTY' ? 'FIRST-PARTY WEBSITE' : 'INDEPENDENT';
+  const linkedCandidates =
+    source.kind === 'IDENTITY'
+      ? lookup.result?.candidates ?? []
+      : (lookup.result?.candidates ?? []).filter(
+          item => item.id === source.candidateId,
+        );
 
   const openSource = async () => {
     if (!source.url) {
@@ -176,6 +182,31 @@ export function SourceDetailScreen({
         <View style={styles.card}>
           <Text style={styles.sectionLabel}>EVIDENCE</Text>
           <Text style={styles.evidence}>{source.description}</Text>
+          {linkedCandidates.length > 1 ? (
+            <View style={styles.linkedCandidates}>
+              <Text style={styles.linkedCandidatesLabel}>CANDIDATE NAMES</Text>
+              {linkedCandidates.map(linkedCandidate => (
+                <View key={linkedCandidate.id} style={styles.candidateRow}>
+                  <View style={styles.candidateCopy}>
+                    <Text style={styles.candidateName}>{linkedCandidate.name}</Text>
+                    <Text style={styles.candidateMeta}>
+                      {linkedCandidate.kind === 'BUSINESS'
+                        ? 'Business'
+                        : linkedCandidate.kind === 'PERSON'
+                        ? 'Person'
+                        : 'Caller'}
+                      {linkedCandidate.region
+                        ? ` · ${linkedCandidate.region}`
+                        : ''}
+                    </Text>
+                  </View>
+                  <Text style={styles.candidateConfidence}>
+                    {linkedCandidate.score}
+                  </Text>
+                </View>
+              ))}
+            </View>
+          ) : null}
           <View style={styles.divider} />
           {hasUrl ? (
             <Pressable
@@ -360,6 +391,41 @@ const createStyles = (theme: AppTheme) =>
       letterSpacing: -0.65,
       lineHeight: 25,
       marginTop: 17,
+    },
+    linkedCandidates: { gap: 12, marginTop: 22 },
+    linkedCandidatesLabel: {
+      color: theme.mutedText,
+      fontFamily: fonts.extraBold,
+      fontSize: 12,
+      letterSpacing: 1.15,
+    },
+    candidateRow: {
+      alignItems: 'center',
+      backgroundColor: theme.background,
+      borderRadius: radii.control,
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      minHeight: 54,
+      paddingHorizontal: 14,
+    },
+    candidateCopy: { flex: 1, paddingRight: 12 },
+    candidateName: {
+      color: theme.bodyText,
+      fontFamily: fonts.bold,
+      fontSize: 15,
+      letterSpacing: -0.5,
+    },
+    candidateMeta: {
+      color: theme.mutedText,
+      fontFamily: fonts.medium,
+      fontSize: 13,
+      marginTop: 2,
+    },
+    candidateConfidence: {
+      color: theme.highConfidence,
+      fontFamily: fonts.extraBold,
+      fontSize: 18,
+      letterSpacing: -0.7,
     },
     divider: { backgroundColor: theme.divider, height: 1, marginVertical: 20 },
     url: {
