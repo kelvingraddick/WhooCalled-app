@@ -1,0 +1,64 @@
+# Resolve react_native_pods.rb with node to allow for hoisting
+require Pod::Executable.execute_command('node', ['-p',
+  'require.resolve(
+    "react-native/scripts/react_native_pods.rb",
+    {paths: [process.argv[1]]},
+  )', __dir__]).strip
+
+platform :ios, min_ios_version_supported
+prepare_react_native_project!
+
+# Build React Native and its dependencies from source for consistent Codegen
+# linkage on simulator and device builds.
+ENV['RCT_USE_PREBUILT_RNCORE'] = '0'
+ENV['RCT_USE_RN_DEP'] = '0'
+
+# Firebase Auth and Functions must share the same FirebaseApp instance so
+# callable requests receive the signed-in user's token. Use CocoaPods for the
+# Firebase SDK graph instead of the isolated per-module SPM copies.
+$RNFirebaseDisableSPM = true
+
+$RNFirebaseAnalyticsWithoutAdIdSupport = true
+
+# Static linkage is required for the shared CocoaPods Firebase graph.
+linkage = ENV['USE_FRAMEWORKS'] || 'static'
+Pod::UI.puts "Configuring Pod with #{linkage}ally linked Frameworks".green
+use_frameworks! :linkage => linkage.to_sym
+
+target 'WhooCalled' do
+  config = use_native_modules!
+
+  use_react_native!(
+    :path => config[:reactNativePath],
+    # An absolute path to your application root.
+    :app_path => "#{Pod::Config.instance.installation_root}/.."
+  )
+
+  post_install do |installer|
+    react_native_post_install(
+      installer,
+      config[:reactNativePath],
+      :mac_catalyst_enabled => false,
+      # :ccache_enabled => true
+    )
+
+    # RNCClipboard 1.16.3 still calls the MobileCoreServices image-type APIs but
+    # does not declare the framework when CocoaPods uses dynamic frameworks.
+    installer.pods_project.targets.each do |target|
+      next unless target.name == 'RNCClipboard'
+
+      target.build_configurations.each do |build_configuration|
+        build_configuration.build_settings['OTHER_LDFLAGS'] =
+          '$(inherited) -framework MobileCoreServices'
+      end
+    end
+
+    # Hermes ships a Release binary immediately after pod install. Mark that
+    # state explicitly so the existing Hermes build phase swaps in its Debug
+    # binary before dynamic React targets link on a first Debug build.
+    File.write(
+      File.join(installer.sandbox.root, 'hermes-engine', '.last_build_configuration'),
+      'Release',
+    )
+  end
+end

@@ -1,0 +1,33 @@
+{
+  "migIndex": 1,
+  "data": [
+    {
+      "path": "assets/fonts/GoogleSans-Medium.ttf",
+      "sha1": "53aec134d76c8ce09e766f29683e24bb4d7cfd8d"
+    },
+    {
+      "path": "node_modules/@expo-google-fonts/manrope/400Regular/Manrope_400Regular.ttf",
+      "sha1": "3f36e4904a42d23273ac346047c1b6bcf067ccfc"
+    },
+    {
+      "path": "node_modules/@expo-google-fonts/manrope/500Medium/Manrope_500Medium.ttf",
+      "sha1": "b5e2c6265e0919163142bb8eac9b6450fb91f920"
+    },
+    {
+      "path": "node_modules/@expo-google-fonts/manrope/600SemiBold/Manrope_600SemiBold.ttf",
+      "sha1": "f7a023cd6c102b2ffa8bf729579552445970d62d"
+    },
+    {
+      "path": "node_modules/@expo-google-fonts/manrope/700Bold/Manrope_700Bold.ttf",
+      "sha1": "dbc0b874ad8b9f3415d0e9b4e22907890ca72327"
+    },
+    {
+      "path": "node_modules/@expo-google-fonts/manrope/800ExtraBold/Manrope_800ExtraBold.ttf",
+      "sha1": "df131208d5c08ff782fbf12c264f473d8dacd83e"
+    },
+    {
+      "path": "node_modules/@react-native-vector-icons/ionicons/fonts/Ionicons.ttf",
+      "sha1": "3a656ee69b64ccb1e57f1721f7659b50c1fb56ef"
+    }
+  ]
+}

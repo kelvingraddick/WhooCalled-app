@@ -1,0 +1,31 @@
+{
+  "indexes": [
+    {
+      "collectionGroup": "lookups",
+      "queryScope": "COLLECTION_GROUP",
+      "fields": [
+        { "fieldPath": "status", "order": "ASCENDING" },
+        { "fieldPath": "lastOpenedAt", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "communitySubmissions",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "numberKey", "order": "ASCENDING" },
+        { "fieldPath": "createdAt", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "communitySubmissionOwners",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "authorUid", "order": "ASCENDING" },
+        { "fieldPath": "numberKey", "order": "ASCENDING" },
+        { "fieldPath": "kind", "order": "ASCENDING" },
+        { "fieldPath": "createdAt", "order": "DESCENDING" }
+      ]
+    }
+  ],
+  "fieldOverrides": []
+}
