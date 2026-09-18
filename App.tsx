@@ -106,6 +106,7 @@ function AppContent() {
   const [activationReturn, setActivationReturn] =
     useState<Exclude<Screen, 'activation'>>('home');
   const [user, setUser] = useState<AppUser | null>(null);
+  const [hasResolvedAuthState, setHasResolvedAuthState] = useState(false);
   const [phoneInput, setPhoneInput] = useState('');
   const [pendingLookup, setPendingLookup] = useState<PendingLookup | null>(
     null,
@@ -195,7 +196,10 @@ function AppContent() {
 
   useEffect(() => {
     configureAnalyticsConsent(false).catch(() => undefined);
-    return authGateway.observe(setUser);
+    return authGateway.observe(nextUser => {
+      setUser(nextUser);
+      setHasResolvedAuthState(true);
+    });
   }, []);
 
   useEffect(() => {
@@ -619,7 +623,11 @@ function AppContent() {
   };
 
   useEffect(() => {
-    if (!preferences.detectClipboardNumbers || screen !== 'home') {
+    if (
+      !hasResolvedAuthState ||
+      !preferences.detectClipboardNumbers ||
+      screen !== 'home'
+    ) {
       return undefined;
     }
 
@@ -661,7 +669,13 @@ function AppContent() {
       }
     });
     return () => subscription.remove();
-  }, [beginLookupFor, phoneInput, preferences.detectClipboardNumbers, screen]);
+  }, [
+    beginLookupFor,
+    hasResolvedAuthState,
+    phoneInput,
+    preferences.detectClipboardNumbers,
+    screen,
+  ]);
 
   const openAccount = (
     destination: Exclude<Screen, 'activation'> = 'profile',

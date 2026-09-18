@@ -11,7 +11,7 @@ export type LocalPreferences = Readonly<{
 export const defaultLocalPreferences: LocalPreferences = {
   appearance: 'system',
   detectClipboardNumbers: true,
-  confirmBeforeSpending: true,
+  confirmBeforeSpending: false,
 };
 
 const storageKey = 'whoo-called.local-preferences.v1';

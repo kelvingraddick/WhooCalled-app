@@ -1,4 +1,5 @@
 import React from 'react';
+import Clipboard from '@react-native-clipboard/clipboard';
 import { act, fireEvent, render, waitFor } from '@testing-library/react-native';
 import { Alert, StyleSheet } from 'react-native';
 
@@ -27,6 +28,7 @@ import { lookupGateway } from '../src/services/lookupGateway';
 
 const mockAuthGateway = authGateway as jest.Mocked<typeof authGateway>;
 const mockLookupGateway = lookupGateway as jest.Mocked<typeof lookupGateway>;
+const mockClipboard = Clipboard as jest.Mocked<typeof Clipboard>;
 
 describe('activation lookup flow', () => {
   beforeEach(() => {
@@ -37,6 +39,7 @@ describe('activation lookup flow', () => {
         buttons?.find(button => button.text === 'Use lookup')?.onPress?.();
       });
     mockAuthGateway.observe.mockImplementation(() => jest.fn());
+    mockClipboard.getString.mockResolvedValue('');
     mockLookupGateway.requestInitialLookup.mockResolvedValue({
       balance: {
         monthlyAllowance: 3,
@@ -111,6 +114,68 @@ describe('activation lookup flow', () => {
       '(404) 555-1212',
     );
     expect(mockLookupGateway.requestInitialLookup).not.toHaveBeenCalled();
+  });
+
+  it('waits for persisted authentication before offering a clipboard lookup', async () => {
+    let notifyAuthState:
+      | ((
+          user: {
+            uid: string;
+            displayName: string | null;
+            email: string | null;
+            provider: 'apple' | 'google' | 'unknown';
+          } | null,
+        ) => void)
+      | null = null;
+    let acceptClipboardLookup: (() => void) | undefined;
+
+    mockAuthGateway.observe.mockImplementation(listener => {
+      notifyAuthState = listener;
+      return jest.fn();
+    });
+    mockClipboard.getString.mockResolvedValue('4045551212');
+    jest
+      .spyOn(Alert, 'alert')
+      .mockImplementation((title, _message, buttons) => {
+        if (title === 'Number copied') {
+          const lookupButton = buttons?.find(
+            button => button.text === 'Look up',
+          );
+          acceptClipboardLookup = lookupButton?.onPress
+            ? () => lookupButton.onPress?.()
+            : undefined;
+          return;
+        }
+
+        buttons?.find(button => button.text === 'Use lookup')?.onPress?.();
+      });
+
+    const screen = await render(<App />);
+    expect(mockClipboard.getString).not.toHaveBeenCalled();
+
+    await act(async () => {
+      notifyAuthState?.({
+        uid: 'persisted-user',
+        displayName: 'Kelvin',
+        email: 'kelvin@example.com',
+        provider: 'apple',
+      });
+    });
+
+    await waitFor(() => {
+      expect(acceptClipboardLookup).toBeDefined();
+    });
+    await act(async () => {
+      acceptClipboardLookup?.();
+    });
+
+    await waitFor(() => {
+      expect(mockLookupGateway.requestInitialLookup).toHaveBeenCalledWith({
+        countryHint: 'US',
+        phoneInput: '(404) 555-1212',
+      });
+    });
+    expect(screen.queryByText(/Start with 3 free/)).toBeNull();
   });
 
   it('keeps an invalid US number on Home and explains how to correct it', async () => {

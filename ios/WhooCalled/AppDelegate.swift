@@ -46,7 +46,16 @@ class ReactNativeDelegate: RCTDefaultReactNativeFactoryDelegate {
     // Whoo Called uses its own Metro port so it can run alongside Kelvin's
     // other React Native projects during local development.
     let bundleURLProvider = RCTBundleURLProvider.sharedSettings()
+#if targetEnvironment(simulator)
     bundleURLProvider.jsLocation = "localhost:8088"
+#else
+    let metroHost = Bundle.main.url(forResource: "ip", withExtension: "txt")
+      .flatMap { try? String(contentsOf: $0, encoding: .utf8) }
+      .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+      .flatMap { $0.isEmpty ? nil : $0 }
+      ?? "localhost"
+    bundleURLProvider.jsLocation = "\(metroHost):8088"
+#endif
     return bundleURLProvider.jsBundleURL(forBundleRoot: "index")
 #else
     return Bundle.main.url(forResource: "main", withExtension: "jsbundle")
