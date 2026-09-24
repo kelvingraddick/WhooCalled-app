@@ -21,7 +21,7 @@ export {
   updateDisplayName,
 } from './settings';
 
-const enforceAppCheck = defineBoolean('ENFORCE_APP_CHECK', { default: false });
+const enforceAppCheck = defineBoolean('ENFORCE_APP_CHECK', { default: true });
 
 function requireAuthenticatedUser(uid: string | undefined): string {
   if (!uid) {

@@ -234,6 +234,33 @@ export function LookupResultScreen({
           </Text>
         ) : null}
 
+        {lookup.resultOutcome === 'NO_USEFUL_EVIDENCE' &&
+        (lookup.creditOutcome === 'RETURNED_NO_RESULT' ||
+          lookup.creditOutcome === 'RETURNED_TECHNICAL') ? (
+          <View style={styles.creditNotice}>
+            <Text style={styles.creditNoticeTitle}>
+              No useful information found.
+            </Text>
+            <Text style={styles.creditNoticeBody}>
+              {lookup.creditOutcome === 'RETURNED_NO_RESULT'
+                ? 'Your lookup was returned.'
+                : 'Some lookup sources did not answer, so your credit was returned.'}
+            </Text>
+          </View>
+        ) : null}
+        {lookup.resultOutcome === 'NO_USEFUL_EVIDENCE' &&
+        lookup.creditOutcome === 'CAPTURED_REFUND_LIMIT' ? (
+          <View style={styles.creditNotice}>
+            <Text style={styles.creditNoticeTitle}>
+              No useful information found.
+            </Text>
+            <Text style={styles.creditNoticeBody}>
+              This lookup counted because your 3 monthly no-result returns have
+              been used.
+            </Text>
+          </View>
+        ) : null}
+
         <View style={styles.sourcesHeader}>
           <Text style={styles.sourcesTitle}>
             PUBLIC WEB REPORTS · {spamSources.length}
@@ -736,6 +763,27 @@ const createStyles = (theme: AppTheme) =>
       lineHeight: 18,
       marginTop: 10,
       textAlign: 'center',
+    },
+    creditNotice: {
+      backgroundColor: theme.highConfidenceSurface,
+      borderColor: theme.highConfidence,
+      borderRadius: radii.control,
+      borderWidth: 1,
+      marginTop: 14,
+      padding: 14,
+    },
+    creditNoticeTitle: {
+      color: theme.highConfidence,
+      fontFamily: fonts.extraBold,
+      fontSize: 15,
+      letterSpacing: -0.45,
+    },
+    creditNoticeBody: {
+      color: theme.bodyText,
+      fontFamily: fonts.medium,
+      fontSize: 13,
+      lineHeight: 18,
+      marginTop: 3,
     },
     spamRiskCard: {
       backgroundColor: theme.lowConfidenceSurface,

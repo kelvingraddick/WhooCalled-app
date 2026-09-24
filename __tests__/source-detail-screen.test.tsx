@@ -15,6 +15,8 @@ const lookup: LookupDetail = {
   status: 'COMPLETE',
   phoneDisplay: '(404) 555-1212',
   numberKey: 'opaque-key',
+  resultOutcome: 'USEFUL',
+  creditOutcome: 'CAPTURED',
   stages: {
     validation: { status: 'COMPLETE', detail: 'Valid' },
     identity: { status: 'COMPLETE', detail: 'Found' },

@@ -292,6 +292,13 @@ export function SettingsScreen({
                   }`
             }
           />
+          {balance?.noResultRefundsEnabled ? (
+            <SettingsRow
+              description="Credits returned when a lookup finds no useful information"
+              label="No-result protection"
+              value={`${balance.noResultRefundsRemaining} of 3`}
+            />
+          ) : null}
           <SettingsRow label="Buy more lookups" onPress={onBuyLookupsPress} />
           <SettingsRow label="Lookup history" onPress={onLookupHistoryPress} />
           <SettingsRow
@@ -345,7 +352,7 @@ export function SettingsScreen({
             <Text style={styles.sectionLabel}>DEBUG</Text>
             <View style={styles.card}>
               <SettingsRow
-                description="Restore consumed monthly lookups without changing active holds or purchased credits"
+                description="Restore consumed monthly lookups and no-result protection without changing active holds or purchased credits"
                 disabled={isDebugActionLoading}
                 label="Reset monthly lookups"
                 onPress={onDebugResetMonthlyLookups}

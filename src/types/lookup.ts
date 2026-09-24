@@ -12,6 +12,12 @@ export type ConfidenceFactorKey =
   | 'NUMBER_VALIDATION';
 export type ConfidenceFactors = Readonly<Record<ConfidenceFactorKey, number>>;
 export type LookupRunStatus = 'QUEUED' | 'RUNNING' | 'COMPLETE' | 'FAILED';
+export type ResultOutcome = 'USEFUL' | 'NO_USEFUL_EVIDENCE';
+export type CreditOutcome =
+  | 'CAPTURED'
+  | 'RETURNED_TECHNICAL'
+  | 'RETURNED_NO_RESULT'
+  | 'CAPTURED_REFUND_LIMIT';
 export type LookupStageKey =
   | 'validation'
   | 'identity'
@@ -104,6 +110,8 @@ export type LookupDetail = Readonly<{
   numberKey: string;
   stages: Readonly<Record<LookupStageKey, LookupStage>>;
   result: LookupResult | null;
+  resultOutcome: ResultOutcome | null;
+  creditOutcome: CreditOutcome | null;
   errorMessage: string | null;
 }>;
 

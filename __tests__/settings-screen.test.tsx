@@ -67,6 +67,8 @@ const renderScreen = async ({
             balance: {
               monthlyAllowance: 3,
               monthlyRemaining: 2,
+              noResultRefundsEnabled: true,
+              noResultRefundsRemaining: 2,
               purchasedCredits: 4,
               planName: 'Free plan',
               subscriptionExpiresAt: null,
@@ -112,6 +114,7 @@ describe('Settings screen', () => {
 
     expect(screen.getAllByText('Kelvin')).toHaveLength(2);
     expect(screen.getByText('2 of 3 +4 extra')).toBeTruthy();
+    expect(screen.getByText('2 of 3')).toBeTruthy();
     expect(screen.getByText(/System \((Dark|Light)\)/)).toBeTruthy();
     expect(screen.getByText('Remove or correct data')).toBeTruthy();
     await fireEvent.press(screen.getByLabelText('Lookup history'));

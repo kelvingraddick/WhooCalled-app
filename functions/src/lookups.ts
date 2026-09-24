@@ -1,4 +1,5 @@
 import { getFunctions } from 'firebase-admin/functions';
+import { randomUUID } from 'node:crypto';
 import {
   FieldValue,
   getFirestore,
@@ -10,7 +11,11 @@ import {
   onCall,
   type CallableRequest,
 } from 'firebase-functions/v2/https';
-import { defineBoolean, defineString } from 'firebase-functions/params';
+import {
+  defineBoolean,
+  defineInt,
+  defineString,
+} from 'firebase-functions/params';
 import { logger } from 'firebase-functions/logger';
 import { ZodError } from 'zod';
 
@@ -42,29 +47,39 @@ import {
   twilioAuthToken,
 } from './providerSecrets';
 import {
-  captureLookupCredit,
   getSettingsBalance,
-  releaseLookupCredit,
   reserveLookupCredit,
+  settleLookupCredit,
 } from './settings';
+import {
+  canReserveProviderBudget,
+  creditSettlementReasonFor,
+  existingProviderReservationAllowsLookup,
+  lookupCacheLifetimeMs,
+  lookupRunClaimDecision,
+  nextLookupRateLimitState,
+  shouldCacheLookupResult,
+} from './lookupControls';
 import {
   formatUsPhone,
   cacheMatchesRetrievalVersion,
   initialStages,
   normalizeUsPhone,
   numberKeyFor,
-  shouldReleaseCreditForPartialResult,
+  resultOutcomeFor,
+  type CreditOutcome,
   type CallerCandidate,
   type EvidenceSource,
   type LookupResult,
   type LookupStageKey,
   type LookupStatus,
   type LookupTask,
+  type ResultOutcome,
 } from './lookupTypes';
 import { emptyConfidenceFactors, scoreCandidates } from './lookupScoring';
 import { sourceOrigin } from './sourceMetadata';
 
-const enforceAppCheck = defineBoolean('ENFORCE_APP_CHECK', { default: false });
+const enforceAppCheck = defineBoolean('ENFORCE_APP_CHECK', { default: true });
 const lookupCallableOptions = {
   enforceAppCheck,
   region: 'us-east4',
@@ -82,7 +97,24 @@ const googleGroundingModel = defineString('GOOGLE_GROUNDING_MODEL', {
 const googleGroundingProjectId = defineString('GOOGLE_GROUNDING_PROJECT_ID', {
   default: 'whoo-called',
 });
-const cacheLifetimeMs = 30 * 24 * 60 * 60 * 1000;
+const noResultRefundsEnabled = defineBoolean('NO_RESULT_REFUNDS_ENABLED', {
+  default: false,
+});
+const lookupRateLimitPerMinute = defineInt('LOOKUP_RATE_LIMIT_PER_MINUTE', {
+  default: 10,
+});
+const providerBudgetPauseCents = defineInt('PROVIDER_BUDGET_PAUSE_CENTS', {
+  default: 22_500,
+});
+const providerBudgetMonthlyCents = defineInt('PROVIDER_BUDGET_MONTHLY_CENTS', {
+  default: 25_000,
+});
+const providerBudgetReservationCents = defineInt(
+  'PROVIDER_BUDGET_RESERVATION_CENTS',
+  { default: 15 },
+);
+const lookupRateLimitWindowMs = 60 * 1000;
+const lookupRunLeaseMs = 150 * 1000;
 const retrievalVersion = 'google-grounding-v1';
 
 type LookupDocument = Readonly<{
@@ -92,8 +124,25 @@ type LookupDocument = Readonly<{
   phoneDisplay: string;
   requestId: string;
   mode: 'INITIAL' | 'REFRESH';
-  creditReservationId: string;
+  creditReservationId?: string;
   result?: LookupResult;
+  resultOutcome?: ResultOutcome;
+  creditOutcome?: CreditOutcome;
+  errorCode?: 'PROVIDER_BUDGET_PAUSED';
+  runLeaseExpiresAt?: string;
+}>;
+
+type ProviderBudgetMetrics = Readonly<{
+  creditOutcome: CreditOutcome;
+  creditSource: 'monthly' | 'purchased';
+  googleQueryCount: number;
+  identitySucceeded: boolean;
+  latencyMs: number;
+  planName: string;
+  resultOutcome: ResultOutcome | null;
+  reputationSucceeded: boolean;
+  validationSucceeded: boolean;
+  webSucceeded: boolean;
 }>;
 
 function requireUid(request: CallableRequest<unknown>): string {
@@ -117,6 +166,254 @@ function cacheReference(numberKey: string): DocumentReference {
 
 function communitySummaryReference(numberKey: string): DocumentReference {
   return getFirestore().doc(`communitySummaries/${numberKey}`);
+}
+
+function lookupRateLimitReference(uid: string): DocumentReference {
+  return getFirestore().doc(`users/${uid}/private/lookupRateLimit`);
+}
+
+function providerBudgetReference(monthKey: string): DocumentReference {
+  return getFirestore().doc(`providerBudgets/${monthKey}`);
+}
+
+function providerBudgetReservationReference(
+  uid: string,
+  lookupId: string,
+): DocumentReference {
+  const reservationKey = numberKeyFor(`${uid}:${lookupId}`);
+  return getFirestore().doc(`providerBudgetReservations/${reservationKey}`);
+}
+
+function utcMonthKey(now: Date): string {
+  return `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(
+    2,
+    '0',
+  )}`;
+}
+
+function count(value: unknown): number {
+  return typeof value === 'number' && Number.isFinite(value) && value > 0
+    ? Math.floor(value)
+    : 0;
+}
+
+async function consumeLookupRateLimit(uid: string): Promise<boolean> {
+  const db = getFirestore();
+  const reference = lookupRateLimitReference(uid);
+  return db.runTransaction(async transaction => {
+    const snapshot = await transaction.get(reference);
+    const decision = nextLookupRateLimitState({
+      current: snapshot.data(),
+      limit: lookupRateLimitPerMinute.value(),
+      now: Date.now(),
+      windowMs: lookupRateLimitWindowMs,
+    });
+    if (decision.allowed) {
+      transaction.set(reference, decision.state, { merge: true });
+    }
+    return decision.allowed;
+  });
+}
+
+async function reserveProviderBudget(
+  uid: string,
+  lookupId: string,
+): Promise<boolean> {
+  const db = getFirestore();
+  const now = new Date();
+  const monthKey = utcMonthKey(now);
+  const budgetRef = providerBudgetReference(monthKey);
+  const reservationRef = providerBudgetReservationReference(uid, lookupId);
+  return db.runTransaction(async transaction => {
+    const [budget, reservation] = await Promise.all([
+      transaction.get(budgetRef),
+      transaction.get(reservationRef),
+    ]);
+    if (reservation.exists) {
+      return existingProviderReservationAllowsLookup(
+        reservation.data()?.status,
+      );
+    }
+
+    const estimatedReservedCents = count(budget.data()?.estimatedReservedCents);
+    const amountCents = providerBudgetReservationCents.value();
+    if (
+      !canReserveProviderBudget({
+        amountCents,
+        pauseAtCents: Math.min(
+          providerBudgetPauseCents.value(),
+          providerBudgetMonthlyCents.value(),
+        ),
+        reservedCents: estimatedReservedCents,
+      })
+    ) {
+      return false;
+    }
+
+    transaction.set(
+      budgetRef,
+      {
+        estimatedReservedCents: estimatedReservedCents + amountCents,
+        monthlyBudgetCents: providerBudgetMonthlyCents.value(),
+        pauseAtCents: providerBudgetPauseCents.value(),
+        updatedAt: FieldValue.serverTimestamp(),
+      },
+      { merge: true },
+    );
+    transaction.set(reservationRef, {
+      amountCents,
+      monthKey,
+      status: 'RESERVED',
+      createdAt: FieldValue.serverTimestamp(),
+    });
+    return true;
+  });
+}
+
+async function releaseProviderBudget(
+  uid: string,
+  lookupId: string,
+): Promise<void> {
+  const db = getFirestore();
+  const reservationRef = providerBudgetReservationReference(uid, lookupId);
+  await db.runTransaction(async transaction => {
+    const reservation = await transaction.get(reservationRef);
+    if (!reservation.exists || reservation.data()?.status !== 'RESERVED') {
+      return;
+    }
+    const monthKey = reservation.data()?.monthKey;
+    if (typeof monthKey !== 'string') {
+      return;
+    }
+    const budgetRef = providerBudgetReference(monthKey);
+    const budget = await transaction.get(budgetRef);
+    const amountCents = count(reservation.data()?.amountCents);
+    transaction.set(
+      budgetRef,
+      {
+        estimatedReservedCents: Math.max(
+          0,
+          count(budget.data()?.estimatedReservedCents) - amountCents,
+        ),
+        updatedAt: FieldValue.serverTimestamp(),
+      },
+      { merge: true },
+    );
+    transaction.set(
+      reservationRef,
+      { status: 'RELEASED', releasedAt: FieldValue.serverTimestamp() },
+      { merge: true },
+    );
+  });
+}
+
+async function markProviderAttemptStarted(
+  uid: string,
+  lookupId: string,
+): Promise<void> {
+  const db = getFirestore();
+  const reservationRef = providerBudgetReservationReference(uid, lookupId);
+  await db.runTransaction(async transaction => {
+    const reservation = await transaction.get(reservationRef);
+    if (!reservation.exists || reservation.data()?.status !== 'RESERVED') {
+      return;
+    }
+    const monthKey = reservation.data()?.monthKey;
+    if (typeof monthKey !== 'string') {
+      return;
+    }
+    const budgetRef = providerBudgetReference(monthKey);
+    const budget = await transaction.get(budgetRef);
+    transaction.set(
+      budgetRef,
+      {
+        uncachedAttempts: count(budget.data()?.uncachedAttempts) + 1,
+        updatedAt: FieldValue.serverTimestamp(),
+      },
+      { merge: true },
+    );
+    transaction.set(
+      reservationRef,
+      { status: 'USED', startedAt: FieldValue.serverTimestamp() },
+      { merge: true },
+    );
+  });
+}
+
+async function completeProviderBudgetReservation(
+  uid: string,
+  lookupId: string,
+  metrics: ProviderBudgetMetrics,
+): Promise<void> {
+  const db = getFirestore();
+  const reservationRef = providerBudgetReservationReference(uid, lookupId);
+  await db.runTransaction(async transaction => {
+    const reservation = await transaction.get(reservationRef);
+    const status = reservation.data()?.status;
+    if (
+      !reservation.exists ||
+      status === 'COMPLETED' ||
+      status === 'RELEASED'
+    ) {
+      return;
+    }
+    const monthKey = reservation.data()?.monthKey;
+    if (typeof monthKey !== 'string') {
+      return;
+    }
+    const budgetRef = providerBudgetReference(monthKey);
+    const budget = await transaction.get(budgetRef);
+    const incrementedAttempts = status === 'RESERVED' ? 1 : 0;
+    const resultCounter =
+      metrics.resultOutcome === 'USEFUL'
+        ? 'usefulOutcomes'
+        : metrics.resultOutcome === 'NO_USEFUL_EVIDENCE'
+        ? 'noUsefulEvidenceOutcomes'
+        : 'technicalFailures';
+    const recordedCreditOutcomes = budget.data()?.creditOutcomes;
+    const creditOutcomes =
+      recordedCreditOutcomes &&
+      typeof recordedCreditOutcomes === 'object' &&
+      !Array.isArray(recordedCreditOutcomes)
+        ? (recordedCreditOutcomes as Record<string, unknown>)
+        : {};
+    transaction.set(
+      budgetRef,
+      {
+        completedAttempts: count(budget.data()?.completedAttempts) + 1,
+        googleQueryCount:
+          count(budget.data()?.googleQueryCount) + metrics.googleQueryCount,
+        [resultCounter]: count(budget.data()?.[resultCounter]) + 1,
+        ...(incrementedAttempts
+          ? {
+              uncachedAttempts:
+                count(budget.data()?.uncachedAttempts) + incrementedAttempts,
+            }
+          : {}),
+        creditOutcomes: {
+          ...creditOutcomes,
+          [metrics.creditOutcome]:
+            count(creditOutcomes[metrics.creditOutcome]) + 1,
+        },
+        updatedAt: FieldValue.serverTimestamp(),
+      },
+      { merge: true },
+    );
+    transaction.set(
+      reservationRef,
+      {
+        ...metrics,
+        status: 'COMPLETED',
+        completedAt: FieldValue.serverTimestamp(),
+      },
+      { merge: true },
+    );
+  });
+}
+
+async function communityReportCount(numberKey: string): Promise<number> {
+  const summary = await communitySummaryReference(numberKey).get();
+  return count(summary.data()?.reportCount);
 }
 
 function communityOwnerReference(submissionId: string): DocumentReference {
@@ -198,12 +495,118 @@ function responseFor(
     | 'ACCEPTED'
     | 'COMPLETE'
     | 'FAILED'
+    | 'RATE_LIMITED'
     | 'INSUFFICIENT_CREDITS'
-    | 'PROVIDER_NOT_CONFIGURED',
+    | 'PROVIDER_NOT_CONFIGURED'
+    | 'PROVIDER_BUDGET_PAUSED',
   message: string,
   balance: Awaited<ReturnType<typeof getSettingsBalance>>,
 ) {
   return { requestId, lookupId, status, message, balance };
+}
+
+async function responseForExistingLookup(
+  uid: string,
+  requestId: string,
+  lookupId: string,
+  existing: Partial<LookupDocument>,
+) {
+  const status =
+    existing.status === 'COMPLETE'
+      ? 'COMPLETE'
+      : existing.status === 'FAILED' &&
+        existing.errorCode === 'PROVIDER_BUDGET_PAUSED'
+      ? 'PROVIDER_BUDGET_PAUSED'
+      : existing.status === 'FAILED'
+      ? 'FAILED'
+      : 'ACCEPTED';
+  return responseFor(
+    requestId,
+    status === 'PROVIDER_BUDGET_PAUSED' ? null : lookupId,
+    status,
+    status === 'COMPLETE'
+      ? 'Lookup is ready.'
+      : status === 'PROVIDER_BUDGET_PAUSED'
+      ? 'Lookup temporarily unavailable. No credit was used.'
+      : status === 'FAILED'
+      ? 'That lookup could not be completed. No credit was used.'
+      : 'Lookup is already in progress.',
+    await getSettingsBalance(uid),
+  );
+}
+
+async function createLookupDocumentOnce(
+  reference: DocumentReference,
+  data: Record<string, unknown>,
+): Promise<boolean> {
+  return getFirestore().runTransaction(async transaction => {
+    const existing = await transaction.get(reference);
+    if (existing.exists) {
+      return false;
+    }
+    transaction.create(reference, data);
+    return true;
+  });
+}
+
+async function existingLookupResponse(
+  uid: string,
+  requestId: string,
+  lookupId: string,
+  reference: DocumentReference,
+) {
+  const existing = await reference.get();
+  if (!existing.exists) {
+    throw new HttpsError('aborted', 'Lookup could not be started. Try again.');
+  }
+  if (existing.data()?.status === 'QUEUED') {
+    try {
+      await enqueueLookup({ uid, lookupId });
+    } catch (error) {
+      logger.warn('Lookup retry enqueue failed', {
+        lookupIdHash: numberKeyFor(lookupId),
+        message: error instanceof Error ? error.message : 'unknown error',
+      });
+    }
+  }
+  return responseForExistingLookup(
+    uid,
+    requestId,
+    lookupId,
+    existing.data() as Partial<LookupDocument>,
+  );
+}
+
+async function claimLookupRun(
+  reference: DocumentReference,
+): Promise<LookupDocument | null> {
+  const attemptId = randomUUID();
+  const now = Date.now();
+  return getFirestore().runTransaction(async transaction => {
+    const snapshot = await transaction.get(reference);
+    if (!snapshot.exists) {
+      return null;
+    }
+    const lookup = snapshot.data() as LookupDocument;
+    const decision = lookupRunClaimDecision({
+      leaseExpiresAt: lookup.runLeaseExpiresAt,
+      now,
+      status: lookup.status,
+    });
+    if (decision === 'TERMINAL') {
+      return null;
+    }
+    if (decision === 'ACTIVE') {
+      throw new Error('Lookup provider run is already active.');
+    }
+    transaction.update(reference, {
+      runAttemptId: attemptId,
+      runLeaseExpiresAt: new Date(now + lookupRunLeaseMs).toISOString(),
+      status: 'RUNNING',
+      updatedAt: new Date(now).toISOString(),
+    });
+    return lookup;
+  });
 }
 
 async function enqueueLookup(task: LookupTask): Promise<void> {
@@ -251,41 +654,36 @@ export const createLookup = onCall(lookupCallableOptions, async request => {
     const reference = lookupReference(uid, lookupId);
     const existingRun = await reference.get();
     if (existingRun.exists) {
-      const existing = existingRun.data() as Partial<LookupDocument>;
+      return existingLookupResponse(uid, input.requestId, lookupId, reference);
+    }
+
+    if (!(await consumeLookupRateLimit(uid))) {
       return responseFor(
         input.requestId,
-        lookupId,
-        existing.status === 'COMPLETE' ? 'COMPLETE' : 'ACCEPTED',
-        existing.status === 'COMPLETE'
-          ? 'Lookup is ready.'
-          : 'Lookup is already in progress.',
+        null,
+        'RATE_LIMITED',
+        'Too many lookups were started recently. Wait a minute and try again. No credit was used.',
         await getSettingsBalance(uid),
       );
     }
 
     const numberKey = numberKeyFor(phoneE164);
-    const reservation = await reserveLookupCredit(uid, lookupId);
-    if (!reservation) {
-      return responseFor(
-        input.requestId,
-        null,
-        'INSUFFICIENT_CREDITS',
-        'You have no lookups remaining. Buy more to continue.',
-        await getSettingsBalance(uid),
-      );
-    }
-
     const now = new Date().toISOString();
-    const cache =
-      input.mode === 'INITIAL' ? await cacheReference(numberKey).get() : null;
+    const [cache, currentCommunityReportCount] =
+      input.mode === 'INITIAL'
+        ? await Promise.all([
+            cacheReference(numberKey).get(),
+            communityReportCount(numberKey),
+          ])
+        : [null, 0];
     const cacheData = cache?.data() as Record<string, unknown> | undefined;
 
-    if (
-      isFreshCache(cacheData) &&
-      !shouldReleaseCreditForPartialResult(cacheData.result)
-    ) {
-      await reference.create({
-        creditReservationId: lookupId,
+    if (isFreshCache(cacheData)) {
+      const resultOutcome = resultOutcomeFor(
+        cacheData.result,
+        currentCommunityReportCount,
+      );
+      const created = await createLookupDocumentOnce(reference, {
         displayName:
           cacheData.result.candidates.find(
             candidate => candidate.id === cacheData.result.primaryCandidateId,
@@ -297,6 +695,7 @@ export const createLookup = onCall(lookupCallableOptions, async request => {
         phoneE164,
         requestId: input.requestId,
         result: cacheData.result,
+        resultOutcome,
         stages: completedStages('Reused a recently completed lookup.'),
         status: 'COMPLETE',
         createdAt: now,
@@ -304,9 +703,22 @@ export const createLookup = onCall(lookupCallableOptions, async request => {
         updatedAt: now,
         confidenceLabel: cacheData.result.confidenceLabel,
         confidenceScore: cacheData.result.confidenceScore,
-        spamReportCount: 0,
+        spamReportCount: currentCommunityReportCount,
+        cacheHit: true,
       });
-      await captureLookupCredit(uid, lookupId);
+      if (!created) {
+        return existingLookupResponse(
+          uid,
+          input.requestId,
+          lookupId,
+          reference,
+        );
+      }
+      logger.info('Lookup economics', {
+        cacheHit: true,
+        creditOutcome: null,
+        resultOutcome,
+      });
       return responseFor(
         input.requestId,
         lookupId,
@@ -316,7 +728,62 @@ export const createLookup = onCall(lookupCallableOptions, async request => {
       );
     }
 
-    await reference.create({
+    const reservation = await reserveLookupCredit(uid, lookupId);
+    if (!reservation) {
+      return responseFor(
+        input.requestId,
+        null,
+        'INSUFFICIENT_CREDITS',
+        'You have no lookups remaining. Buy more to continue.',
+        await getSettingsBalance(uid),
+      );
+    }
+
+    if (!(await reserveProviderBudget(uid, lookupId))) {
+      const settlement = await settleLookupCredit(
+        uid,
+        lookupId,
+        'TECHNICAL_FAILURE',
+      );
+      const created = await createLookupDocumentOnce(reference, {
+        creditReservationId: lookupId,
+        creditOutcome: settlement.creditOutcome,
+        createdAt: now,
+        errorCode: 'PROVIDER_BUDGET_PAUSED',
+        errorMessage: 'Lookup temporarily unavailable. No credit was used.',
+        lastOpenedAt: now,
+        mode: input.mode,
+        numberKey,
+        phoneDisplay: formatUsPhone(phoneE164),
+        phoneE164,
+        requestId: input.requestId,
+        stages: initialStages(),
+        status: 'FAILED',
+        updatedAt: now,
+      });
+      if (!created) {
+        return existingLookupResponse(
+          uid,
+          input.requestId,
+          lookupId,
+          reference,
+        );
+      }
+      logger.warn('Lookup provider budget paused', {
+        cacheHit: false,
+        creditOutcome: settlement.creditOutcome,
+        pauseAtCents: providerBudgetPauseCents.value(),
+      });
+      return responseFor(
+        input.requestId,
+        null,
+        'PROVIDER_BUDGET_PAUSED',
+        'Lookup temporarily unavailable. No credit was used.',
+        await getSettingsBalance(uid),
+      );
+    }
+
+    const created = await createLookupDocumentOnce(reference, {
       creditReservationId: lookupId,
       createdAt: now,
       lastOpenedAt: now,
@@ -329,18 +796,27 @@ export const createLookup = onCall(lookupCallableOptions, async request => {
       status: 'QUEUED',
       updatedAt: now,
     });
+    if (!created) {
+      return existingLookupResponse(uid, input.requestId, lookupId, reference);
+    }
 
     try {
       await enqueueLookup({ uid, lookupId });
     } catch {
+      const settlement = await settleLookupCredit(
+        uid,
+        lookupId,
+        'TECHNICAL_FAILURE',
+      );
       await Promise.all([
         reference.update({
+          creditOutcome: settlement.creditOutcome,
           status: 'FAILED',
           errorMessage:
             'We could not start this lookup. Your credit was returned.',
           updatedAt: new Date().toISOString(),
         }),
-        releaseLookupCredit(uid, lookupId),
+        releaseProviderBudget(uid, lookupId),
       ]);
       return responseFor(
         input.requestId,
@@ -466,6 +942,7 @@ function toSpamSources(
 type PublicSearchOutcome = Readonly<{
   attribution: GoogleSearchAttribution | null;
   evidence: WebEvidence[];
+  googleQueryCount: number;
   succeeded: boolean;
 }>;
 
@@ -524,6 +1001,7 @@ async function runPublicSearch(
     return {
       attribution: result.attribution,
       evidence: result.evidence,
+      googleQueryCount: result.diagnostics.googleQueryCount,
       succeeded: true,
     };
   } catch (googleError) {
@@ -566,7 +1044,12 @@ async function runPublicSearch(
               } found`
             : 'No matching public pages found.',
         );
-        return { attribution: null, evidence, succeeded: true };
+        return {
+          attribution: null,
+          evidence,
+          googleQueryCount: 0,
+          succeeded: true,
+        };
       } catch (braveError) {
         logger.warn('Lookup provider failed', {
           provider: isReputation
@@ -585,7 +1068,12 @@ async function runPublicSearch(
         ? 'Public spam-report source did not answer.'
         : 'Public web source did not answer.',
     );
-    return { attribution: null, evidence: [], succeeded: false };
+    return {
+      attribution: null,
+      evidence: [],
+      googleQueryCount: 0,
+      succeeded: false,
+    };
   }
 }
 
@@ -593,13 +1081,44 @@ async function finishFailedLookup(
   reference: DocumentReference,
   uid: string,
   lookupId: string,
+  metrics: Omit<
+    ProviderBudgetMetrics,
+    'creditOutcome' | 'creditSource' | 'planName' | 'resultOutcome'
+  >,
 ): Promise<void> {
-  await releaseLookupCredit(uid, lookupId);
+  const settlement = await settleLookupCredit(
+    uid,
+    lookupId,
+    'TECHNICAL_FAILURE',
+  );
   await reference.update({
+    creditOutcome: settlement.creditOutcome,
     status: 'FAILED',
     errorMessage:
       'We could not reach any lookup sources. Your credit was returned.',
     updatedAt: new Date().toISOString(),
+  });
+  await completeProviderBudgetReservation(uid, lookupId, {
+    ...metrics,
+    creditOutcome: settlement.creditOutcome,
+    creditSource: settlement.source,
+    planName: settlement.planName,
+    resultOutcome: null,
+  });
+  logger.info('Lookup economics', {
+    cacheHit: false,
+    creditOutcome: settlement.creditOutcome,
+    creditSource: settlement.source,
+    estimatedCostCents: providerBudgetReservationCents.value(),
+    googleQueryCount: metrics.googleQueryCount,
+    identitySucceeded: metrics.identitySucceeded,
+    latencyMs: metrics.latencyMs,
+    noResultRefundsRemaining: settlement.noResultRefundsRemaining,
+    planName: settlement.planName,
+    reputationSucceeded: metrics.reputationSucceeded,
+    resultOutcome: null,
+    validationSucceeded: metrics.validationSucceeded,
+    webSucceeded: metrics.webSucceeded,
   });
 }
 
@@ -623,19 +1142,13 @@ export const runLookup = onTaskDispatched<LookupTask>(
   async request => {
     const { uid, lookupId } = request.data;
     const reference = lookupReference(uid, lookupId);
-    const snapshot = await reference.get();
-    if (!snapshot.exists) {
-      return;
-    }
-    const lookup = snapshot.data() as LookupDocument;
-    if (lookup.status === 'COMPLETE' || lookup.status === 'FAILED') {
+    const lookup = await claimLookupRun(reference);
+    if (!lookup) {
       return;
     }
 
-    await reference.update({
-      status: 'RUNNING',
-      updatedAt: new Date().toISOString(),
-    });
+    const lookupStartedAt = Date.now();
+    await markProviderAttemptStarted(uid, lookupId);
     const failures: string[] = [];
     let validation: PhoneValidation | null = null;
     let owners: IdentityOwner[] = [];
@@ -760,7 +1273,15 @@ export const runLookup = onTaskDispatched<LookupTask>(
       !webSucceeded &&
       !reputationSucceeded
     ) {
-      await finishFailedLookup(reference, uid, lookupId);
+      await finishFailedLookup(reference, uid, lookupId, {
+        googleQueryCount:
+          webOutcome.googleQueryCount + reputationOutcome.googleQueryCount,
+        identitySucceeded,
+        latencyMs: Date.now() - lookupStartedAt,
+        reputationSucceeded,
+        validationSucceeded,
+        webSucceeded,
+      });
       return;
     }
 
@@ -834,6 +1355,10 @@ export const runLookup = onTaskDispatched<LookupTask>(
       searchAttributions,
       isPartial: failures.length > 0,
     };
+    const currentCommunityReportCount = await communityReportCount(
+      lookup.numberKey,
+    );
+    const resultOutcome = resultOutcomeFor(result, currentCommunityReportCount);
 
     await setStage(
       reference,
@@ -843,23 +1368,31 @@ export const runLookup = onTaskDispatched<LookupTask>(
         sources.length
       } sources.`,
     );
-    const creditReturned = shouldReleaseCreditForPartialResult(result);
-    if (creditReturned) {
-      await releaseLookupCredit(uid, lookup.creditReservationId);
-      logger.info('Lookup credit returned for an evidence-free partial result');
-    } else {
-      await captureLookupCredit(uid, lookup.creditReservationId);
-    }
+    const settlementReason = creditSettlementReasonFor({
+      isPartial: result.isPartial,
+      noResultRefundsEnabled: noResultRefundsEnabled.value(),
+      resultOutcome,
+    });
+    const settlement = await settleLookupCredit(
+      uid,
+      lookup.creditReservationId ?? lookupId,
+      settlementReason,
+    );
     const db = getFirestore();
     const batch = db.batch();
-    if (!creditReturned) {
+    if (
+      shouldCacheLookupResult({ isPartial: result.isPartial, resultOutcome })
+    ) {
       batch.set(
         cacheReference(lookup.numberKey),
         {
           result,
+          resultOutcome,
           retrievalVersion,
           updatedAt: checkedAt,
-          expiresAt: new Date(Date.now() + cacheLifetimeMs).toISOString(),
+          expiresAt: new Date(
+            Date.now() + lookupCacheLifetimeMs(resultOutcome),
+          ).toISOString(),
         },
         { merge: true },
       );
@@ -867,16 +1400,46 @@ export const runLookup = onTaskDispatched<LookupTask>(
     batch.update(reference, {
       status: 'COMPLETE',
       result,
+      resultOutcome,
       displayName: primary?.name ?? 'Unknown caller',
       phoneDisplay: result.phoneDisplay,
       confidenceLabel: result.confidenceLabel,
       confidenceScore: result.confidenceScore,
-      spamReportCount: 0,
-      creditOutcome: creditReturned ? 'RETURNED' : 'CAPTURED',
+      spamReportCount: currentCommunityReportCount,
+      creditOutcome: settlement.creditOutcome,
       completedAt: checkedAt,
       updatedAt: checkedAt,
     });
     await batch.commit();
+    const googleQueryCount =
+      webOutcome.googleQueryCount + reputationOutcome.googleQueryCount;
+    await completeProviderBudgetReservation(uid, lookupId, {
+      creditOutcome: settlement.creditOutcome,
+      creditSource: settlement.source,
+      googleQueryCount,
+      identitySucceeded,
+      latencyMs: Date.now() - lookupStartedAt,
+      planName: settlement.planName,
+      resultOutcome,
+      reputationSucceeded,
+      validationSucceeded,
+      webSucceeded,
+    });
+    logger.info('Lookup economics', {
+      cacheHit: false,
+      creditOutcome: settlement.creditOutcome,
+      creditSource: settlement.source,
+      estimatedCostCents: providerBudgetReservationCents.value(),
+      googleQueryCount,
+      identitySucceeded,
+      latencyMs: Date.now() - lookupStartedAt,
+      noResultRefundsRemaining: settlement.noResultRefundsRemaining,
+      planName: settlement.planName,
+      reputationSucceeded,
+      resultOutcome,
+      validationSucceeded,
+      webSucceeded,
+    });
   },
 );
 

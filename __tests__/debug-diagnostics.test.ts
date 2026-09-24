@@ -7,6 +7,8 @@ describe('debug diagnostics', () => {
         balance: {
           monthlyAllowance: 15,
           monthlyRemaining: 12,
+          noResultRefundsEnabled: true,
+          noResultRefundsRemaining: 2,
           purchasedCredits: 4,
           planName: 'Plus',
           subscriptionExpiresAt: '2026-09-30T00:00:00.000Z',
@@ -23,6 +25,7 @@ describe('debug diagnostics', () => {
         'Firebase UID: tester-a',
         'Plan: Plus',
         'Monthly lookups: 12 of 15',
+        'No-result returns: 2 of 3',
         'Purchased lookups: 4',
       ].join('\n'),
     );

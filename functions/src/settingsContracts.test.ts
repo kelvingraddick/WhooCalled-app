@@ -8,11 +8,13 @@ import {
   releaseCredit,
   monthlyAllowance,
   monthlyRemaining,
+  noResultRefundsRemaining,
   normalizeCreditBalance,
   parseCreditProductMap,
   resetMonthlyUsageForTesting,
   revenueCatProductMap,
   reserveCredit,
+  settleReservedCredit,
 } from './settingsContracts';
 
 test('resets the monthly allowance on the first day of a UTC calendar month', () => {
@@ -21,6 +23,7 @@ test('resets the monthly allowance on the first day of a UTC calendar month', ()
     {
       monthKey: '2026-08',
       monthlyUsed: 3,
+      noResultRefundsUsed: 3,
       purchasedCredits: 5,
       subscriptionAllowance: null,
       subscriptionExpiresAt: null,
@@ -32,6 +35,7 @@ test('resets the monthly allowance on the first day of a UTC calendar month', ()
   assert.equal(calendarMonthKey(now), '2026-09');
   assert.equal(monthlyAllowance(balance), 3);
   assert.equal(monthlyRemaining(balance), 3);
+  assert.equal(noResultRefundsRemaining(balance), 3);
   assert.equal(balance.purchasedCredits, 5);
 });
 
@@ -74,12 +78,121 @@ test('debug reset restores monthly quota without changing holds or purchases', (
   const reset = resetMonthlyUsageForTesting(balance);
 
   assert.equal(reset.monthlyUsed, 0);
+  assert.equal(reset.noResultRefundsUsed, 0);
   assert.equal(reset.heldMonthly, 2);
   assert.equal(reset.purchasedCredits, 7);
   assert.equal(reset.heldPurchased, 1);
   assert.equal(reset.subscriptionAllowance, 15);
   assert.equal(reset.subscriptionExpiresAt, balance.subscriptionExpiresAt);
   assert.equal(reset.planName, 'Plus');
+});
+
+test('returns the first three no-result credits account-wide then captures', () => {
+  let balance = normalizeCreditBalance(
+    {
+      monthKey: '2026-09',
+      monthlyUsed: 0,
+      purchasedCredits: 5,
+    },
+    new Date('2026-09-02T00:00:00.000Z'),
+  );
+
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const reservation = reserveCredit(balance);
+    assert.ok(reservation);
+    const settlement = settleReservedCredit(
+      reservation.balance,
+      reservation.source,
+      'NO_USEFUL_EVIDENCE',
+      true,
+    );
+    assert.equal(settlement.outcome, 'RETURNED_NO_RESULT');
+    balance = settlement.balance;
+  }
+
+  const fourthReservation = reserveCredit(balance);
+  assert.ok(fourthReservation);
+  const fourth = settleReservedCredit(
+    fourthReservation.balance,
+    fourthReservation.source,
+    'NO_USEFUL_EVIDENCE',
+    true,
+  );
+  assert.equal(fourth.outcome, 'CAPTURED_REFUND_LIMIT');
+  assert.equal(fourth.balance.monthlyUsed, 1);
+  assert.equal(noResultRefundsRemaining(fourth.balance), 0);
+});
+
+test('technical failures return credits without using no-result protection', () => {
+  const balance = normalizeCreditBalance(
+    { monthKey: '2026-09', purchasedCredits: 1 },
+    new Date('2026-09-02T00:00:00.000Z'),
+  );
+  const reservation = reserveCredit(balance);
+  assert.ok(reservation);
+  const settlement = settleReservedCredit(
+    reservation.balance,
+    reservation.source,
+    'TECHNICAL_FAILURE',
+    true,
+  );
+
+  assert.equal(settlement.outcome, 'RETURNED_TECHNICAL');
+  assert.equal(settlement.balance.noResultRefundsUsed, 0);
+  assert.equal(noResultRefundsRemaining(settlement.balance), 3);
+});
+
+test('uses the same no-result limit for purchased-credit reservations', () => {
+  const balance = normalizeCreditBalance(
+    {
+      monthKey: '2026-09',
+      monthlyUsed: 3,
+      noResultRefundsUsed: 2,
+      purchasedCredits: 2,
+    },
+    new Date('2026-09-02T00:00:00.000Z'),
+  );
+  const reservation = reserveCredit(balance);
+  assert.ok(reservation);
+  assert.equal(reservation.source, 'purchased');
+  const returned = settleReservedCredit(
+    reservation.balance,
+    reservation.source,
+    'NO_USEFUL_EVIDENCE',
+    true,
+  );
+  assert.equal(returned.outcome, 'RETURNED_NO_RESULT');
+  assert.equal(returned.balance.purchasedCredits, 2);
+
+  const finalReservation = reserveCredit(returned.balance);
+  assert.ok(finalReservation);
+  const captured = settleReservedCredit(
+    finalReservation.balance,
+    finalReservation.source,
+    'NO_USEFUL_EVIDENCE',
+    true,
+  );
+  assert.equal(captured.outcome, 'CAPTURED_REFUND_LIMIT');
+  assert.equal(captured.balance.purchasedCredits, 1);
+});
+
+test('preserves capture behavior while no-result returns are disabled', () => {
+  const balance = normalizeCreditBalance(
+    { monthKey: '2026-09' },
+    new Date('2026-09-02T00:00:00.000Z'),
+  );
+  const reservation = reserveCredit(balance);
+  assert.ok(reservation);
+  const settlement = settleReservedCredit(
+    reservation.balance,
+    reservation.source,
+    'NO_USEFUL_EVIDENCE',
+    false,
+  );
+
+  assert.equal(settlement.outcome, 'CAPTURED');
+  assert.equal(settlement.balance.monthlyUsed, 1);
+  assert.equal(settlement.balance.noResultRefundsUsed, 0);
 });
 
 test('captures terminal results and releases total operational failures', () => {
@@ -117,7 +230,7 @@ test('rejects unconfigured RevenueCat product grants', () => {
   });
 });
 
-test('defines every production RevenueCat product with its intended quota', () => {
+test('defines current products and hidden annual products with their quotas', () => {
   assert.deepEqual(revenueCatProductMap, {
     'com.wavelinkllc.whoocalled.plus.monthly': {
       monthlyAllowance: 15,

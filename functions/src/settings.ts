@@ -12,7 +12,11 @@ import {
   onRequest,
   type CallableRequest,
 } from 'firebase-functions/v2/https';
-import { defineSecret, defineString } from 'firebase-functions/params';
+import {
+  defineBoolean,
+  defineSecret,
+  defineString,
+} from 'firebase-functions/params';
 import { ZodError, z } from 'zod';
 
 import { verifyRevenueCatWebhookSignature } from './revenueCatWebhookSignature';
@@ -29,14 +33,16 @@ import {
   displayNameSchema,
   monthlyAllowance,
   monthlyRemaining,
+  noResultRefundsRemaining,
   normalizeCreditBalance,
   parseCreditProductMap,
   purchasedRemaining,
   resetMonthlyUsageForTesting,
-  captureCredit,
-  releaseCredit,
   reserveCredit,
+  settleReservedCredit,
   supportTicketSchema,
+  type CreditSettlementOutcome,
+  type CreditSettlementReason,
   type CreditBalance,
   type RevenueCatWebhookEvent,
 } from './settingsContracts';
@@ -49,7 +55,14 @@ const creditProductMapParameter = defineString('CREDIT_PRODUCT_MAP', {
   default: '{}',
 });
 const debugTesterEmailsParameter = defineString('DEBUG_TESTER_EMAILS');
-const settingsCallableOptions = { region: 'us-east4' } as const;
+const enforceAppCheck = defineBoolean('ENFORCE_APP_CHECK', { default: true });
+const noResultRefundsEnabled = defineBoolean('NO_RESULT_REFUNDS_ENABLED', {
+  default: false,
+});
+const settingsCallableOptions = {
+  enforceAppCheck,
+  region: 'us-east4',
+} as const;
 
 const recentAuthenticationWindowMs = 5 * 60 * 1000;
 // Each community contribution needs three deletes plus, at most, one summary
@@ -70,6 +83,8 @@ export type SettingsSnapshot = Readonly<{
   balance: Readonly<{
     monthlyAllowance: number;
     monthlyRemaining: number;
+    noResultRefundsEnabled: boolean;
+    noResultRefundsRemaining: number;
     purchasedCredits: number;
     planName: string;
     subscriptionExpiresAt: string | null;
@@ -134,6 +149,8 @@ function toSnapshot(
     balance: {
       monthlyAllowance: monthlyAllowance(balance),
       monthlyRemaining: monthlyRemaining(balance),
+      noResultRefundsEnabled: noResultRefundsEnabled.value(),
+      noResultRefundsRemaining: noResultRefundsRemaining(balance),
       purchasedCredits: purchasedRemaining(balance),
       planName: balance.planName ?? 'Free plan',
       subscriptionExpiresAt: balance.subscriptionExpiresAt
@@ -595,7 +612,10 @@ export async function reserveLookupCredit(
 
     if (reservationDocument.exists) {
       const source = reservationDocument.data()?.source;
-      if (source === 'monthly' || source === 'purchased') {
+      if (
+        reservationDocument.data()?.status === 'HELD' &&
+        (source === 'monthly' || source === 'purchased')
+      ) {
         return { source };
       }
       throw new HttpsError(
@@ -633,24 +653,63 @@ export async function reserveLookupCredit(
   };
 }
 
-export async function captureLookupCredit(
+function existingCreditOutcome(value: unknown): CreditSettlementOutcome | null {
+  return value === 'CAPTURED' ||
+    value === 'RETURNED_TECHNICAL' ||
+    value === 'RETURNED_NO_RESULT' ||
+    value === 'CAPTURED_REFUND_LIMIT'
+    ? value
+    : null;
+}
+
+export async function settleLookupCredit(
   uid: string,
   reservationId: string,
-): Promise<void> {
+  reason: CreditSettlementReason,
+): Promise<{
+  creditOutcome: CreditSettlementOutcome;
+  noResultRefundsRemaining: number;
+  planName: string;
+  source: 'monthly' | 'purchased';
+}> {
   const db = getFirestore();
   const balanceRef = balanceReference(db, uid);
   const reservationRef = lookupReservationReference(db, uid, reservationId);
 
-  await db.runTransaction(async transaction => {
+  return db.runTransaction(async transaction => {
     const [balanceDocument, reservationDocument] = await Promise.all([
       transaction.get(balanceRef),
       transaction.get(reservationRef),
     ]);
     const source = reservationDocument.data()?.source;
     const status = reservationDocument.data()?.status;
+    const recordedOutcome = existingCreditOutcome(
+      reservationDocument.data()?.creditOutcome,
+    );
 
-    if (status === 'CAPTURED') {
-      return;
+    const balance = normalizeCreditBalance(
+      balanceDocument.data() as Partial<CreditBalance> | undefined,
+      new Date(),
+    );
+    if (recordedOutcome && (source === 'monthly' || source === 'purchased')) {
+      return {
+        creditOutcome: recordedOutcome,
+        noResultRefundsRemaining: noResultRefundsRemaining(balance),
+        planName: balance.planName ?? 'Free plan',
+        source,
+      };
+    }
+    if (
+      (status === 'CAPTURED' || status === 'RELEASED') &&
+      (source === 'monthly' || source === 'purchased')
+    ) {
+      return {
+        creditOutcome:
+          status === 'CAPTURED' ? 'CAPTURED' : 'RETURNED_TECHNICAL',
+        noResultRefundsRemaining: noResultRefundsRemaining(balance),
+        planName: balance.planName ?? 'Free plan',
+        source,
+      };
     }
     if (status !== 'HELD' || (source !== 'monthly' && source !== 'purchased')) {
       throw new HttpsError(
@@ -659,57 +718,41 @@ export async function captureLookupCredit(
       );
     }
 
-    const balance = normalizeCreditBalance(
-      balanceDocument.data() as Partial<CreditBalance> | undefined,
-      new Date(),
+    const settlement = settleReservedCredit(
+      balance,
+      source,
+      reason,
+      noResultRefundsEnabled.value(),
     );
-    const updated = captureCredit(balance, source);
-    transaction.set(balanceRef, updated, { merge: true });
+    transaction.set(balanceRef, settlement.balance, { merge: true });
     transaction.set(
       reservationRef,
-      { status: 'CAPTURED', capturedAt: FieldValue.serverTimestamp() },
+      {
+        status: 'SETTLED',
+        creditOutcome: settlement.outcome,
+        settledAt: FieldValue.serverTimestamp(),
+      },
       { merge: true },
     );
+    return {
+      creditOutcome: settlement.outcome,
+      noResultRefundsRemaining: noResultRefundsRemaining(settlement.balance),
+      planName: settlement.balance.planName ?? 'Free plan',
+      source,
+    };
   });
+}
+
+export async function captureLookupCredit(
+  uid: string,
+  reservationId: string,
+): Promise<void> {
+  await settleLookupCredit(uid, reservationId, 'CAPTURE');
 }
 
 export async function releaseLookupCredit(
   uid: string,
   reservationId: string,
 ): Promise<void> {
-  const db = getFirestore();
-  const balanceRef = balanceReference(db, uid);
-  const reservationRef = lookupReservationReference(db, uid, reservationId);
-
-  await db.runTransaction(async transaction => {
-    const [balanceDocument, reservationDocument] = await Promise.all([
-      transaction.get(balanceRef),
-      transaction.get(reservationRef),
-    ]);
-    const source = reservationDocument.data()?.source;
-    const status = reservationDocument.data()?.status;
-
-    if (status === 'RELEASED') {
-      return;
-    }
-    if (status !== 'HELD' || (source !== 'monthly' && source !== 'purchased')) {
-      throw new HttpsError(
-        'failed-precondition',
-        'Lookup credit hold is invalid.',
-      );
-    }
-
-    const balance = normalizeCreditBalance(
-      balanceDocument.data() as Partial<CreditBalance> | undefined,
-      new Date(),
-    );
-    transaction.set(balanceRef, releaseCredit(balance, source), {
-      merge: true,
-    });
-    transaction.set(
-      reservationRef,
-      { status: 'RELEASED', releasedAt: FieldValue.serverTimestamp() },
-      { merge: true },
-    );
-  });
+  await settleLookupCredit(uid, reservationId, 'TECHNICAL_FAILURE');
 }

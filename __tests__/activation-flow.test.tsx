@@ -44,6 +44,8 @@ describe('activation lookup flow', () => {
       balance: {
         monthlyAllowance: 3,
         monthlyRemaining: 3,
+        noResultRefundsEnabled: false,
+        noResultRefundsRemaining: 3,
         purchasedCredits: 0,
         planName: 'Free plan',
         subscriptionExpiresAt: null,

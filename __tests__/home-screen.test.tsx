@@ -134,4 +134,39 @@ describe('Home lookup balance', () => {
 
     expect(onMoreLookupsPress).toHaveBeenCalledTimes(1);
   });
+
+  it('discloses when empty lookups count after protection is exhausted', () => {
+    let screen: ReactTestRenderer.ReactTestRenderer;
+
+    ReactTestRenderer.act(() => {
+      screen = ReactTestRenderer.create(
+        <HomeScreen
+          balance={{
+            monthlyAllowance: 3,
+            monthlyRemaining: 2,
+            noResultRefundsEnabled: true,
+            noResultRefundsRemaining: 0,
+          }}
+          lookupState={{ kind: 'idle' }}
+          onHistoryPress={jest.fn()}
+          onLookupFlowOpen={jest.fn()}
+          onLookupPress={jest.fn()}
+          onMoreLookupsPress={jest.fn()}
+          onMenuPress={jest.fn()}
+          onPhoneInputChange={jest.fn()}
+          onRecentLookupPress={jest.fn()}
+          phoneInput=""
+          recentLookups={[]}
+          user={null}
+        />,
+      );
+    });
+
+    expect(
+      screen!.root.findByProps({ testID: 'no-result-disclosure' }).props
+        .children,
+    ).toBe(
+      'No-result protection used this month. This lookup counts even if empty.',
+    );
+  });
 });

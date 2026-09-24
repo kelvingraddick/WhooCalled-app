@@ -10,6 +10,8 @@ type CreateLookupResponse = Readonly<{
   balance: Readonly<{
     monthlyAllowance: number;
     monthlyRemaining: number;
+    noResultRefundsEnabled: boolean;
+    noResultRefundsRemaining: number;
     purchasedCredits: number;
     planName: string;
     subscriptionExpiresAt: string | null;
@@ -20,7 +22,9 @@ type CreateLookupResponse = Readonly<{
     | 'ACCEPTED'
     | 'COMPLETE'
     | 'FAILED'
+    | 'RATE_LIMITED'
     | 'PROVIDER_NOT_CONFIGURED'
+    | 'PROVIDER_BUDGET_PAUSED'
     | 'INSUFFICIENT_CREDITS';
   message: string;
 }>;

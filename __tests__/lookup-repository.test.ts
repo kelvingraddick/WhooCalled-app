@@ -20,6 +20,8 @@ describe('lookupDetailFromDocument', () => {
       status: 'COMPLETE',
       phoneDisplay: '(404) 555-1212',
       numberKey: 'opaque-key',
+      resultOutcome: 'USEFUL',
+      creditOutcome: 'CAPTURED',
       stages,
       result: {
         phoneDisplay: '(404) 555-1212',
@@ -93,6 +95,8 @@ describe('lookupDetailFromDocument', () => {
     expect(detail.result?.searchAttributions).toEqual([
       expect.objectContaining({ stage: 'web', provider: 'GOOGLE_GROUNDING' }),
     ]);
+    expect(detail.resultOutcome).toBe('USEFUL');
+    expect(detail.creditOutcome).toBe('CAPTURED');
   });
 
   it('defaults malformed factor fields without rejecting the lookup', () => {

@@ -28,6 +28,8 @@ type HomeScreenProps = Readonly<{
   balance: Readonly<{
     monthlyAllowance: number;
     monthlyRemaining: number;
+    noResultRefundsEnabled?: boolean;
+    noResultRefundsRemaining?: number;
   }> | null;
   user: AppUser | null;
   phoneInput: string;
@@ -167,6 +169,18 @@ export function HomeScreen({
         )}
       </Pressable>
 
+      {balance?.noResultRefundsEnabled ? (
+        <Text style={styles.protectionDisclosure} testID="no-result-disclosure">
+          {(balance.noResultRefundsRemaining ?? 0) > 0
+            ? `No useful result? ${
+                balance.noResultRefundsRemaining
+              } no-result ${
+                balance.noResultRefundsRemaining === 1 ? 'return' : 'returns'
+              } remaining this month.`
+            : 'No-result protection used this month. This lookup counts even if empty.'}
+        </Text>
+      ) : null}
+
       {lookupState.kind === 'message' ? (
         <Text
           style={[
@@ -225,7 +239,7 @@ export function HomeScreen({
               NEED MORE?
             </Text>
           </View>
-          <Text style={styles.upgradePrice}>15 / mo{`\n`}for $5.99</Text>
+          <Text style={styles.upgradePrice}>15 / mo{`\n`}for $6.99</Text>
           <Text style={styles.upgradeLink}>Upgrade →</Text>
         </Pressable>
       </View>
@@ -439,6 +453,14 @@ const createStyles = (theme: AppTheme) =>
     },
     pressed: { opacity: 0.82 },
     disabled: { opacity: 0.65 },
+    protectionDisclosure: {
+      color: theme.mutedText,
+      fontFamily: fonts.medium,
+      fontSize: 12,
+      lineHeight: 17,
+      marginTop: 9,
+      textAlign: 'center',
+    },
     feedback: {
       color: theme.bodyText,
       fontFamily: fonts.medium,

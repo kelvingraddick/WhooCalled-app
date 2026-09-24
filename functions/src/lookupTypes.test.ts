@@ -8,6 +8,7 @@ import {
   initialStages,
   normalizeUsPhone,
   numberKeyFor,
+  resultOutcomeFor,
   shouldReleaseCreditForPartialResult,
 } from './lookupTypes';
 
@@ -124,5 +125,34 @@ test('evidence-free partial results return the held credit', () => {
       isPartial: true,
     }),
     false,
+  );
+});
+
+test('classifies useful evidence without relying on partial provider status', () => {
+  const emptyResult = {
+    phoneDisplay: '(404) 555-1212',
+    carrier: null,
+    lineType: null,
+    region: null,
+    checkedAt: '2026-09-02T00:00:00.000Z',
+    confidenceScore: 0,
+    confidenceLabel: 'LOW' as const,
+    primaryCandidateId: null,
+    candidates: [],
+    sources: [],
+    spamSources: [],
+    searchAttributions: [],
+    isPartial: false,
+  };
+
+  assert.equal(resultOutcomeFor(emptyResult), 'NO_USEFUL_EVIDENCE');
+  assert.equal(resultOutcomeFor(emptyResult, 1), 'USEFUL');
+  assert.equal(
+    resultOutcomeFor({ ...emptyResult, carrier: 'Verizon' }),
+    'USEFUL',
+  );
+  assert.equal(
+    resultOutcomeFor({ ...emptyResult, lineType: 'mobile' }),
+    'USEFUL',
   );
 });

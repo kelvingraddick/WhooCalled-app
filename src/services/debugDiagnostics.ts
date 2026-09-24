@@ -21,6 +21,9 @@ export function formatDebugDiagnostics({
     `Firebase UID: ${uid}`,
     `Plan: ${balance.planName}`,
     `Monthly lookups: ${balance.monthlyRemaining} of ${balance.monthlyAllowance}`,
+    ...(balance.noResultRefundsEnabled
+      ? [`No-result returns: ${balance.noResultRefundsRemaining} of 3`]
+      : []),
     `Purchased lookups: ${balance.purchasedCredits}`,
   ].join('\n');
 }

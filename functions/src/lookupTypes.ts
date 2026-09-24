@@ -16,6 +16,12 @@ export type LookupStageStatus =
   | 'FAILED'
   | 'SKIPPED';
 export type LookupStatus = 'QUEUED' | 'RUNNING' | 'COMPLETE' | 'FAILED';
+export type ResultOutcome = 'USEFUL' | 'NO_USEFUL_EVIDENCE';
+export type CreditOutcome =
+  | 'CAPTURED'
+  | 'RETURNED_TECHNICAL'
+  | 'RETURNED_NO_RESULT'
+  | 'CAPTURED_REFUND_LIMIT';
 export type ConfidenceLabel = 'VERY HIGH' | 'HIGH' | 'MEDIUM' | 'LOW';
 export const confidenceFactorKeys = [
   'BASE_CONFIDENCE',
@@ -85,17 +91,25 @@ export type LookupResult = Readonly<{
   isPartial: boolean;
 }>;
 
+export function resultOutcomeFor(
+  result: LookupResult,
+  communityReportCount = 0,
+): ResultOutcome {
+  const hasUsefulEvidence =
+    result.candidates.length > 0 ||
+    result.sources.length > 0 ||
+    result.spamSources.length > 0 ||
+    result.carrier !== null ||
+    result.lineType !== null ||
+    communityReportCount > 0;
+
+  return hasUsefulEvidence ? 'USEFUL' : 'NO_USEFUL_EVIDENCE';
+}
+
 export function shouldReleaseCreditForPartialResult(
   result: LookupResult,
 ): boolean {
-  return (
-    result.isPartial &&
-    result.candidates.length === 0 &&
-    result.sources.length === 0 &&
-    result.spamSources.length === 0 &&
-    result.carrier === null &&
-    result.lineType === null
-  );
+  return result.isPartial && resultOutcomeFor(result) === 'NO_USEFUL_EVIDENCE';
 }
 
 export function cacheMatchesRetrievalVersion(

@@ -233,6 +233,8 @@ export function PurchaseScreen({
   message,
   hasPaidSubscription,
   currentPlanName,
+  noResultRefundsEnabled,
+  noResultRefundsRemaining,
   onBack,
   onBuy,
   onRestore,
@@ -242,6 +244,8 @@ export function PurchaseScreen({
   message: string | null;
   hasPaidSubscription: boolean;
   currentPlanName: string;
+  noResultRefundsEnabled: boolean;
+  noResultRefundsRemaining: number;
   onBack: () => void;
   onBuy: (value: RevenueCatPackage) => void;
   onRestore: () => void;
@@ -352,6 +356,17 @@ export function PurchaseScreen({
           Every plan gets full sources and confidence. You&apos;re only buying
           lookups.
         </Text>
+        {noResultRefundsEnabled ? (
+          <View style={styles.protectionCard}>
+            <Text style={styles.protectionTitle}>
+              {noResultRefundsRemaining} of 3 no-result returns remaining
+            </Text>
+            <Text style={styles.protectionBody}>
+              Credits are returned for up to 3 lookups each month when no useful
+              information is found. After that, empty results count as a lookup.
+            </Text>
+          </View>
+        ) : null}
         {hasAnnualPlans ? (
           <View style={styles.billingToggle}>
             {(['monthly', 'annual'] as const).map(period => (
@@ -689,6 +704,27 @@ const createStyles = (theme: AppTheme) =>
       letterSpacing: -0.5,
       lineHeight: 22,
       marginTop: 12,
+    },
+    protectionCard: {
+      backgroundColor: theme.purchaseSurface,
+      borderColor: theme.surfaceBorder,
+      borderRadius: radii.card,
+      borderWidth: 1,
+      marginTop: 18,
+      padding: 16,
+    },
+    protectionTitle: {
+      color: theme.text,
+      fontFamily: fonts.extraBold,
+      fontSize: 15,
+      letterSpacing: -0.45,
+    },
+    protectionBody: {
+      color: theme.purchaseMutedText,
+      fontFamily: fonts.medium,
+      fontSize: 13,
+      lineHeight: 18,
+      marginTop: 5,
     },
     billingToggle: {
       backgroundColor: theme.purchaseSurface,

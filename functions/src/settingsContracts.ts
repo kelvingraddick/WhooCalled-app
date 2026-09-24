@@ -31,6 +31,7 @@ export type CreditBalance = Readonly<{
   monthKey: string;
   monthlyUsed: number;
   heldMonthly: number;
+  noResultRefundsUsed: number;
   purchasedCredits: number;
   heldPurchased: number;
   subscriptionAllowance: number | null;
@@ -39,6 +40,7 @@ export type CreditBalance = Readonly<{
 }>;
 
 export const freeMonthlyAllowance = 3;
+export const monthlyNoResultRefundLimit = 3;
 
 export function calendarMonthKey(now: Date): string {
   return `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(
@@ -67,6 +69,13 @@ export function normalizeCreditBalance(
     Number.isInteger(candidate.heldMonthly) &&
     candidate.heldMonthly > 0
       ? candidate.heldMonthly
+      : 0;
+  const noResultRefundsUsed =
+    isCurrentMonth &&
+    typeof candidate.noResultRefundsUsed === 'number' &&
+    Number.isInteger(candidate.noResultRefundsUsed) &&
+    candidate.noResultRefundsUsed > 0
+      ? Math.min(candidate.noResultRefundsUsed, monthlyNoResultRefundLimit)
       : 0;
   const purchasedCredits =
     typeof candidate.purchasedCredits === 'number' &&
@@ -97,6 +106,7 @@ export function normalizeCreditBalance(
     monthKey,
     monthlyUsed,
     heldMonthly,
+    noResultRefundsUsed,
     purchasedCredits,
     heldPurchased,
     subscriptionAllowance,
@@ -123,10 +133,61 @@ export function purchasedRemaining(balance: CreditBalance): number {
   return Math.max(0, balance.purchasedCredits - balance.heldPurchased);
 }
 
+export function noResultRefundsRemaining(balance: CreditBalance): number {
+  return Math.max(0, monthlyNoResultRefundLimit - balance.noResultRefundsUsed);
+}
+
 export function resetMonthlyUsageForTesting(
   balance: CreditBalance,
 ): CreditBalance {
-  return { ...balance, monthlyUsed: 0 };
+  return { ...balance, monthlyUsed: 0, noResultRefundsUsed: 0 };
+}
+
+export type CreditSettlementReason =
+  | 'CAPTURE'
+  | 'TECHNICAL_FAILURE'
+  | 'NO_USEFUL_EVIDENCE';
+
+export type CreditSettlementOutcome =
+  | 'CAPTURED'
+  | 'RETURNED_TECHNICAL'
+  | 'RETURNED_NO_RESULT'
+  | 'CAPTURED_REFUND_LIMIT';
+
+export function settleReservedCredit(
+  balance: CreditBalance,
+  source: 'monthly' | 'purchased',
+  reason: CreditSettlementReason,
+  noResultRefundsEnabled: boolean,
+): { balance: CreditBalance; outcome: CreditSettlementOutcome } {
+  if (reason === 'TECHNICAL_FAILURE') {
+    return {
+      balance: releaseCredit(balance, source),
+      outcome: 'RETURNED_TECHNICAL',
+    };
+  }
+
+  if (
+    reason === 'NO_USEFUL_EVIDENCE' &&
+    noResultRefundsEnabled &&
+    noResultRefundsRemaining(balance) > 0
+  ) {
+    return {
+      balance: {
+        ...releaseCredit(balance, source),
+        noResultRefundsUsed: balance.noResultRefundsUsed + 1,
+      },
+      outcome: 'RETURNED_NO_RESULT',
+    };
+  }
+
+  return {
+    balance: captureCredit(balance, source),
+    outcome:
+      reason === 'NO_USEFUL_EVIDENCE' && noResultRefundsEnabled
+        ? 'CAPTURED_REFUND_LIMIT'
+        : 'CAPTURED',
+  };
 }
 
 export function reserveCredit(
@@ -191,6 +252,8 @@ export const revenueCatProductMap = {
     monthlyAllowance: 15,
     planName: 'Plus',
   },
+  // Annual products stay recognized for existing subscribers but are hidden
+  // from the client storefront until retention and cost data justify them.
   'com.wavelinkllc.whoocalled.plus.annual': {
     monthlyAllowance: 15,
     planName: 'Plus',

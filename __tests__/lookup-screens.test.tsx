@@ -16,6 +16,8 @@ const lookup: LookupDetail = {
   status: 'COMPLETE',
   phoneDisplay: '(404) 555-1212',
   numberKey: 'opaque-number-key',
+  resultOutcome: 'USEFUL',
+  creditOutcome: 'CAPTURED',
   stages: {
     validation: { status: 'COMPLETE', detail: 'Verizon · Mobile' },
     identity: { status: 'COMPLETE', detail: '2 candidate names found' },
@@ -112,6 +114,25 @@ const lookup: LookupDetail = {
       },
     ],
     isPartial: false,
+  },
+};
+
+const emptyLookup: LookupDetail = {
+  ...lookup,
+  id: 'lookup-empty',
+  resultOutcome: 'NO_USEFUL_EVIDENCE',
+  creditOutcome: 'RETURNED_NO_RESULT',
+  result: {
+    ...lookup.result!,
+    carrier: null,
+    lineType: null,
+    region: null,
+    confidenceScore: 0,
+    confidenceLabel: 'LOW',
+    primaryCandidateId: null,
+    candidates: [],
+    sources: [],
+    spamSources: [],
   },
 };
 
@@ -278,6 +299,83 @@ describe('lookup screens', () => {
     });
 
     expect(onDeleteReport).toHaveBeenCalledTimes(1);
+  });
+
+  it('explains when an empty result returns the lookup credit', async () => {
+    const screen = await renderWithTheme(
+      <LookupResultScreen
+        lookup={emptyLookup}
+        onBack={jest.fn()}
+        onCandidates={jest.fn()}
+        onComments={jest.fn()}
+        onCorrectData={jest.fn()}
+        onDeleteReport={jest.fn()}
+        onMessage={jest.fn()}
+        onRefresh={jest.fn()}
+        onReport={jest.fn()}
+        onSource={jest.fn()}
+        hasOwnReport={false}
+        isRefreshing={false}
+        reportSummary={{
+          total: 0,
+          counts: {
+            SPAM: 0,
+            SCAM_FRAUD: 0,
+            TELEMARKETING: 0,
+            ROBOCALL: 0,
+            DEBT_COLLECTION: 0,
+            POLITICAL: 0,
+            SURVEY: 0,
+            OTHER: 0,
+          },
+        }}
+        selectedCandidateId={null}
+        summary={{ reportCount: 0, commentCount: 0 }}
+      />,
+    );
+
+    expect(screen.getByText('No useful information found.')).toBeTruthy();
+    expect(screen.getByText('Your lookup was returned.')).toBeTruthy();
+  });
+
+  it('explains when empty results count after protection is exhausted', async () => {
+    const screen = await renderWithTheme(
+      <LookupResultScreen
+        lookup={{ ...emptyLookup, creditOutcome: 'CAPTURED_REFUND_LIMIT' }}
+        onBack={jest.fn()}
+        onCandidates={jest.fn()}
+        onComments={jest.fn()}
+        onCorrectData={jest.fn()}
+        onDeleteReport={jest.fn()}
+        onMessage={jest.fn()}
+        onRefresh={jest.fn()}
+        onReport={jest.fn()}
+        onSource={jest.fn()}
+        hasOwnReport={false}
+        isRefreshing={false}
+        reportSummary={{
+          total: 0,
+          counts: {
+            SPAM: 0,
+            SCAM_FRAUD: 0,
+            TELEMARKETING: 0,
+            ROBOCALL: 0,
+            DEBT_COLLECTION: 0,
+            POLITICAL: 0,
+            SURVEY: 0,
+            OTHER: 0,
+          },
+        }}
+        selectedCandidateId={null}
+        summary={{ reportCount: 0, commentCount: 0 }}
+      />,
+    );
+
+    expect(
+      screen.getByText(
+        'This lookup counted because your 3 monthly no-result returns have been used.',
+      ),
+    ).toBeTruthy();
   });
 
   it('shows a disabled loading control while a refresh is being started', async () => {

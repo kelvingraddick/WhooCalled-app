@@ -11,9 +11,11 @@ import type {
   ConfidenceLabel,
   EvidenceSource,
   LookupDetail,
+  CreditOutcome,
   LookupResult,
   LookupRunStatus,
   LookupStageKey,
+  ResultOutcome,
 } from '../types/lookup';
 
 function record(value: unknown): Record<string, unknown> {
@@ -61,6 +63,19 @@ function status(value: unknown): LookupRunStatus {
     value === 'FAILED'
     ? value
     : 'FAILED';
+}
+
+function resultOutcome(value: unknown): ResultOutcome | null {
+  return value === 'USEFUL' || value === 'NO_USEFUL_EVIDENCE' ? value : null;
+}
+
+function creditOutcome(value: unknown): CreditOutcome | null {
+  return value === 'CAPTURED' ||
+    value === 'RETURNED_TECHNICAL' ||
+    value === 'RETURNED_NO_RESULT' ||
+    value === 'CAPTURED_REFUND_LIMIT'
+    ? value
+    : null;
 }
 
 function candidate(value: unknown): CallerCandidate {
@@ -206,6 +221,8 @@ export function lookupDetailFromDocument(
     numberKey: string(item.numberKey),
     stages: stages(item.stages),
     result: result(item.result),
+    resultOutcome: resultOutcome(item.resultOutcome),
+    creditOutcome: creditOutcome(item.creditOutcome),
     errorMessage: nullableString(item.errorMessage),
   };
 }

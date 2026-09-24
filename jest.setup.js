@@ -18,6 +18,11 @@ jest.mock('@react-native-firebase/analytics', () => ({
   setAnalyticsCollectionEnabled: jest.fn(() => Promise.resolve()),
 }));
 
+jest.mock('@react-native-firebase/app-check', () => ({
+  initializeAppCheck: jest.fn(),
+  ReactNativeFirebaseAppCheckProvider: jest.fn(),
+}));
+
 jest.mock('@react-native-firebase/auth', () => ({
   AppleAuthProvider: { credential: jest.fn() },
   GoogleAuthProvider: { credential: jest.fn() },

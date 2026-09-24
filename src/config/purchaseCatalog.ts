@@ -32,14 +32,6 @@ export const purchaseCatalog = [
     monthlyAllowance: 15,
   },
   {
-    productIdentifier: 'com.wavelinkllc.whoocalled.plus.annual',
-    kind: 'subscription',
-    title: 'Plus',
-    plan: 'plus',
-    billingPeriod: 'annual',
-    monthlyAllowance: 15,
-  },
-  {
     productIdentifier: 'com.wavelinkllc.whoocalled.pro.monthly',
     kind: 'subscription',
     title: 'Pro',
@@ -48,27 +40,11 @@ export const purchaseCatalog = [
     monthlyAllowance: 35,
   },
   {
-    productIdentifier: 'com.wavelinkllc.whoocalled.pro.annual',
-    kind: 'subscription',
-    title: 'Pro',
-    plan: 'pro',
-    billingPeriod: 'annual',
-    monthlyAllowance: 35,
-  },
-  {
     productIdentifier: 'com.wavelinkllc.whoocalled.power.monthly',
     kind: 'subscription',
     title: 'Power',
     plan: 'power',
     billingPeriod: 'monthly',
-    monthlyAllowance: 60,
-  },
-  {
-    productIdentifier: 'com.wavelinkllc.whoocalled.power.annual',
-    kind: 'subscription',
-    title: 'Power',
-    plan: 'power',
-    billingPeriod: 'annual',
     monthlyAllowance: 60,
   },
   {

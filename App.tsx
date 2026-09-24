@@ -45,6 +45,7 @@ import {
   AppPreferencesProvider,
 } from './src/preferences/AppPreferences';
 import { authGateway, type AppUser } from './src/services/authGateway';
+import { initializeWhooCalledAppCheck } from './src/services/appCheck';
 import {
   getLookupHistoryPage,
   observeRecentLookups,
@@ -77,6 +78,8 @@ import type {
   SpamReportCategory,
 } from './src/types/lookup';
 import { formatUsPhoneInput, isValidUsPhoneInput } from './src/utils/phone';
+
+initializeWhooCalledAppCheck();
 
 type Screen =
   | 'home'
@@ -442,7 +445,12 @@ function AppContent() {
 
       setLookupState({
         kind: 'message',
-        tone: result.status === 'PROVIDER_NOT_CONFIGURED' ? 'neutral' : 'error',
+        tone:
+          result.status === 'PROVIDER_NOT_CONFIGURED' ||
+          result.status === 'PROVIDER_BUDGET_PAUSED' ||
+          result.status === 'RATE_LIMITED'
+            ? 'neutral'
+            : 'error',
         message:
           result.status === 'PROVIDER_NOT_CONFIGURED'
             ? 'Lookups are not available yet. No credit was used.'
@@ -506,7 +514,11 @@ function AppContent() {
 
     Alert.alert(
       'Use 1 lookup?',
-      'Refresh checks this number again and uses one remaining lookup.',
+      settingsSnapshot?.balance.noResultRefundsEnabled
+        ? settingsSnapshot.balance.noResultRefundsRemaining === 0
+          ? 'Refresh checks this number again and counts even if no useful information is found because your monthly no-result returns have been used.'
+          : 'Refresh checks this number again and uses one remaining lookup. A credit may be returned when no useful information is found.'
+        : 'Refresh checks this number again and uses one remaining lookup.',
       [
         { style: 'cancel', text: 'Not now' },
         {
@@ -516,7 +528,13 @@ function AppContent() {
         },
       ],
     );
-  }, [activeLookup, preferences.confirmBeforeSpending, submitRefresh]);
+  }, [
+    activeLookup,
+    preferences.confirmBeforeSpending,
+    settingsSnapshot?.balance.noResultRefundsEnabled,
+    settingsSnapshot?.balance.noResultRefundsRemaining,
+    submitRefresh,
+  ]);
 
   const submitConfirmedLookup = useCallback(
     (lookup: PendingLookup) => {
@@ -527,7 +545,11 @@ function AppContent() {
 
       Alert.alert(
         'Use 1 lookup?',
-        'This will use one of your remaining lookups. You can change this in Settings.',
+        settingsSnapshot?.balance.noResultRefundsEnabled
+          ? settingsSnapshot.balance.noResultRefundsRemaining === 0
+            ? 'This lookup counts even if no useful information is found because your monthly no-result returns have been used.'
+            : 'This uses one remaining lookup. A credit may be returned when no useful information is found. You can change confirmations in Settings.'
+          : 'This will use one of your remaining lookups. You can change this in Settings.',
         [
           { style: 'cancel', text: 'Not now' },
           {
@@ -538,7 +560,12 @@ function AppContent() {
         ],
       );
     },
-    [preferences.confirmBeforeSpending, submitLookup],
+    [
+      preferences.confirmBeforeSpending,
+      settingsSnapshot?.balance.noResultRefundsEnabled,
+      settingsSnapshot?.balance.noResultRefundsRemaining,
+      submitLookup,
+    ],
   );
 
   const beginLookupFor = useCallback(
@@ -1173,6 +1200,12 @@ function AppContent() {
             <PurchaseScreen
               currentPlanName={
                 settingsSnapshot?.balance.planName ?? 'Free plan'
+              }
+              noResultRefundsEnabled={Boolean(
+                settingsSnapshot?.balance.noResultRefundsEnabled,
+              )}
+              noResultRefundsRemaining={
+                settingsSnapshot?.balance.noResultRefundsRemaining ?? 0
               }
               hasPaidSubscription={Boolean(
                 settingsSnapshot?.balance.subscriptionExpiresAt,

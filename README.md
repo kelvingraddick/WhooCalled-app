@@ -51,9 +51,14 @@ Analytics is disabled by default. It may be enabled only after the user
 provides consent, and phone numbers, identity results, and other sensitive
 lookup data must never be sent as Analytics parameters.
 
-The checked-in functions/.env.whoo-called keeps App Check in monitoring mode
-for this project. Change it to true only after App Check is enforced for beta
-lookup and billing endpoints.
+The app initializes Firebase App Check before rendering. Debug builds use the
+Firebase debug provider, so register each logged debug token in the Firebase
+console before testing enforced callable Functions. Release builds use App
+Attest on Apple platforms and Play Integrity on Android. The App Attest
+entitlement resolves to `development` for Debug builds and `production` for
+Release builds. Keep
+`ENFORCE_APP_CHECK=true` for deployed callable Functions after both release
+providers are registered in Firebase.
 
 ## Phone lookup release prerequisites
 
@@ -83,9 +88,31 @@ Set `LOOKUP_PROVIDER_CONFIGURED=true` only after the secrets, provider
 accounts, public community guidelines, and legal URLs are approved. Deploying
 the Functions code creates the `runLookup` Firebase task queue configuration.
 This provider migration does not change Firestore rules or indexes and does not
-include a TestFlight release. Initial and refresh lookups hold one credit,
-capture it for every terminal result including partial and no-match results,
-and return it only for a total operational failure.
+include a TestFlight release.
+
+The no-result policy is controlled by `NO_RESULT_REFUNDS_ENABLED`. When it is
+enabled, the first three uncached results per account and UTC calendar month
+that contain no identity, caller name, public source, spam source, community
+report, carrier, or line-type evidence return the held credit. Later empty
+results capture the credit. Technical failures always return the credit and do
+not consume no-result protection. Positive cache entries live for 30 days;
+empty entries live for 24 hours. Cache hits do not reserve or consume credits.
+Evidence-free partial provider failures are not cached, so a provider outage
+does not become a 24-hour negative result.
+
+Uncached provider calls reserve 15 cents against the monthly server-side
+budget. New uncached calls pause at $225, leaving a $25 buffer beneath the
+$250 operating ceiling. Cached results remain available while the circuit
+breaker is active. The first rollout should leave
+`NO_RESULT_REFUNDS_ENABLED=false` until App Check is enforced, then enable it
+for the limited beta and review the first 100 uncached attempts or 30 days.
+
+The current catalog exposes monthly plans only: Plus at $6.99 for 15 monthly
+lookups, Pro at $14.99 for 35, and Power at $24.99 for 60. RevenueCat and App
+Store Connect remain the storefront price authorities, so confirm those three
+prices and remove annual packages from the active offering before release.
+Existing annual entitlements remain recognized server-side. Reconcile actual
+provider invoices before expanding beyond the beta.
 
 The Vertex AI service has a recurring $10 monthly Cloud Billing budget alert
 for project `whoo-called`, with current-spend notifications at 50%, 90%, and
